@@ -49,6 +49,39 @@ class TaskConfig:
             data = yaml.safe_load(f) or {}
         return cls(data)
 
+    @classmethod
+    def builtin(cls, name: str) -> "TaskConfig":
+        """Load a built-in task config by name (e.g. ``"bci_comp_iv_2a"``).
+
+        Resolves the YAML from the installed package data so it works
+        regardless of the current working directory::
+
+            config = TaskConfig.builtin("bci_comp_iv_2a")
+
+        Available names correspond to filenames (without ``.yaml``) in
+        ``neuroatom/importers/task_configs/``.
+        """
+        import importlib.resources as _res
+
+        pkg = "neuroatom.importers.task_configs"
+        fname = f"{name}.yaml"
+        try:
+            ref = _res.files(pkg).joinpath(fname)
+            text = ref.read_text(encoding="utf-8")
+        except (FileNotFoundError, TypeError, ModuleNotFoundError):
+            # List available configs for a helpful error message
+            avail = sorted(
+                r.name.removesuffix(".yaml")
+                for r in _res.files(pkg).iterdir()
+                if r.name.endswith(".yaml") and not r.name.startswith("_")
+            )
+            raise FileNotFoundError(
+                f"No built-in task config '{name}'. "
+                f"Available: {avail}"
+            ) from None
+        data = yaml.safe_load(text) or {}
+        return cls(data)
+
     @property
     def dataset_id(self) -> str:
         return self._data.get("dataset_id", "unknown")

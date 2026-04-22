@@ -3,11 +3,21 @@
 Decompose heterogeneous EEG datasets into standardized atomic units
 with rich metadata, enabling unified querying and ML pipeline integration.
 
-Quick-start::
+Quick-start (5 lines to a DataLoader)::
+
+    import neuroatom as na
+
+    loader = na.quickload(
+        "bci_comp_iv_2a",
+        data_path="data/A01T.mat",
+        subject="A01",
+        batch_size=32,
+    )
+
+For full control, use the lower-level API::
 
     from neuroatom import Pool, Indexer, QueryBuilder
     from neuroatom import DatasetAssembler, AssemblyRecipe, LabelSpec
-    from neuroatom import AtomDataset  # requires pip install neuroatom[torch]
 """
 
 __version__ = "0.1.0"
@@ -59,6 +69,10 @@ from neuroatom.index.import_log import log_import, get_import_history
 # ── Importer base (for building custom importers) ────────────────────
 from neuroatom.importers.base import BaseImporter, ImportResult, TaskConfig
 
+# ── High-level convenience API ────────────────────────────────────────
+from neuroatom.quick import quickload
+from neuroatom.importers.registry import get_importer_class, list_formats
+
 __all__ = [
     # version
     "__version__",
@@ -103,4 +117,8 @@ __all__ = [
     "BaseImporter",
     "ImportResult",
     "TaskConfig",
+    # convenience API
+    "quickload",
+    "get_importer_class",
+    "list_formats",
 ]

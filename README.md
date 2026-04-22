@@ -7,47 +7,88 @@ NeuroAtom solves a fundamental problem in neural signal research: every dataset 
 ## Installation
 
 ```bash
-# Core (pool, index, assembly — no heavy dependencies)
-pip install .
-
-# With MNE-Python support (EDF, BDF, GDF, BrainVision, CNT, BIDS)
-pip install ".[mne]"
-
-# With PyTorch DataLoader integration
-pip install ".[torch]"
-
-# Everything
-pip install ".[all]"
-
-# Development (adds pytest)
-pip install ".[dev]"
+pip install ".[all]"       # Everything (MNE + PyTorch + tools)
 ```
+
+<details>
+<summary>Install only what you need</summary>
+
+```bash
+pip install .              # Core only (pool, index, assembly)
+pip install ".[mne]"       # + MNE-Python (EDF, BDF, GDF, BrainVision, CNT)
+pip install ".[torch]"     # + PyTorch DataLoader integration
+pip install ".[dev]"       # + pytest for development
+```
+</details>
 
 ## Quick Start
 
+5 lines from raw data to a PyTorch DataLoader:
+
 ```python
-from pathlib import Path
-from neuroatom import Pool, Indexer, QueryBuilder, DatasetAssembler, AssemblyRecipe, LabelSpec
-from neuroatom.importers.bci_comp_iv_2a import BCICompIV2aImporter
-from neuroatom.importers.base import TaskConfig
+import neuroatom as na
+
+loader = na.quickload(
+    "bci_comp_iv_2a",              # dataset name (auto-resolves config)
+    data_path="data/A01T.mat",     # your data file
+    subject="A01",
+    batch_size=32,
+    band=(0.5, 40.0),             # optional bandpass filter
+)
+
+for batch in loader:
+    signals = batch["signal"]      # (32, 25, 1500) float32
+    labels = batch["labels"]       # {"mi_class": tensor}
+    break
+```
+
+Need train/test split? Add one argument:
+
+```python
+train_loader, test_loader = na.quickload(
+    "bci_comp_iv_2a",
+    data_path="data/A01T.mat",
+    subject="A01",
+    batch_size=32,
+    split_test_ratio=0.2,
+)
+```
+
+See [`examples/`](examples/) for complete scripts including a full [EEGNet training loop](examples/train_simple_cnn.py).
+
+<details>
+<summary><strong>Advanced Usage</strong> — full control over Pool, Indexer, Assembler</summary>
+
+The `quickload` API is a thin wrapper around NeuroAtom's modular pipeline. When you need fine-grained control — custom queries, multi-dataset federation, channel mapping, per-subject normalization — use the lower-level API:
+
+```python
+from neuroatom import Pool, Indexer, QueryBuilder, DatasetAssembler
+from neuroatom import AssemblyRecipe, LabelSpec, TaskConfig
 
 # 1. Create pool and import
 pool = Pool.create("./my_pool")
-config = TaskConfig.from_yaml("neuroatom/importers/task_configs/bci_comp_iv_2a.yaml")
+config = TaskConfig.builtin("bci_comp_iv_2a")  # built-in YAML config
+
+from neuroatom.importers.bci_comp_iv_2a import BCICompIV2aImporter
 importer = BCICompIV2aImporter(pool, config)
 importer.import_subject(mat_path="data/A01T.mat", subject_id="A01")
 
 # 2. Index and query
 indexer = Indexer(pool)
 indexer.reindex_all()
-qb = QueryBuilder(indexer.backend)
-ids = qb.query_atom_ids({"dataset_id": "bci_comp_iv_2a"})  # 288 atoms
 
-# 3. Assemble into ML-ready dataset
+qb = QueryBuilder(indexer.backend)
+left_ids = qb.query_atom_ids({
+    "dataset_id": "bci_comp_iv_2a",
+    "annotations": [{"name": "mi_class", "value_in": ["left_hand"]}],
+})
+
+# 3. Assemble with full pipeline control
 recipe = AssemblyRecipe(
-    recipe_id="demo",
+    recipe_id="my_experiment",
     query={"dataset_id": "bci_comp_iv_2a"},
     target_sampling_rate=250.0,
+    target_duration=4.0,
     filter_band=(0.5, 40.0),
     target_unit="uV",
     label_fields=[LabelSpec(annotation_name="mi_class", output_key="mi_class")],
@@ -59,34 +100,31 @@ from neuroatom.loader.torch_dataset import AtomDataset
 from torch.utils.data import DataLoader
 
 loader = DataLoader(AtomDataset(result.train_samples), batch_size=32, shuffle=True)
-for batch in loader:
-    signals = batch["signal"]   # (B, C, T) float32
-    labels = batch["labels"]    # dict of label tensors
-    break
 ```
 
-See [`examples/`](examples/) for complete working scripts including a full training loop with EEGNet.
+</details>
 
-## Supported Formats & Importers
+## Supported Datasets & Importers
 
-| Format | Importer | Datasets | Notes |
-|--------|----------|----------|-------|
-| MNE-native | `mne_generic` | Any | EDF, BDF, GDF, FIF, BrainVision, CNT, MFF |
-| MATLAB .mat | `mat` | Any | v5 + v7.3 (HDF5), auto-detect keys |
-| BCI IV 2a | `bci_comp_iv_2a` | 9 subj, 4-class MI | .mat struct-of-runs |
-| PhysioNet MI | `physionet_mi` | 109 subj, motor imagery/execution | EDF, 64 ch @ 160 Hz |
-| SEED-V | `seed_v` | 16 subj, 5-emotion | Neuroscan .cnt, 62 ch @ 1000 Hz |
-| Zuco 2.0 | `zuco2` | 18 subj, reading EEG | EEGLAB HDF5, 105 ch @ 500 Hz |
+| Dataset | Importer | Scale | Notes |
+|---------|----------|-------|-------|
+| BCI IV 2a | `bci_comp_iv_2a` | 9 subj, 4-class MI | .mat, 25 ch @ 250 Hz |
+| PhysioNet MI | `physionet_mi` | 109 subj | EDF, 64 ch @ 160 Hz |
+| SEED-V | `seed_v` | 16 subj, 5-emotion | .cnt, 62 ch @ 1000 Hz |
+| Zuco 2.0 | `zuco2` | 18 subj, reading | EEGLAB HDF5, 105 ch @ 500 Hz |
 | CCEP-COREG | `ccep_bids_npy` | 36 subj, EEG+sEEG | BIDS .npy, multi-modal |
-| ChineseEEG-2 | `chinese_eeg2` | 10 subj, listening+reading | BIDS BrainVision, 128 ch, sentence-level |
-| KUL / DTU AAD | `aad_mat` | 16+18 subj, auditory attention | .mat struct-of-trials |
-| BIDS generic | `bids` | Any BIDS dataset | Auto-traversal |
-| EEGLAB | `eeglab` | Any .set/.fdt | Via MNE |
-| MOABB | `moabb_bridge` | 30+ public BCI datasets | Via MOABB library |
+| ChineseEEG-2 | `chinese_eeg2` | 10 subj, listen+read | BIDS BrainVision, 128 ch |
+| KUL / DTU AAD | `aad_mat` | 16+18 subj | .mat, auditory attention |
+| Any MNE format | `mne_generic` | — | EDF, BDF, GDF, FIF, CNT, MFF |
+| Any BIDS | `bids` | — | Auto-traversal |
+| Any EEGLAB | `eeglab` | — | .set/.fdt |
+| MOABB bridge | `moabb_bridge` | 30+ datasets | Via MOABB library |
 
-Each importer has a matching YAML task config in `neuroatom/importers/task_configs/`.
+Each dataset has a built-in YAML config: `TaskConfig.builtin("bci_comp_iv_2a")`.
 
 ## CLI
+
+The CLI is for batch processing and scripting. The Python API is for interactive exploration and model training. Both operate on the same Pool and can be mixed freely.
 
 ```bash
 neuroatom init ./my_pool                      # Create pool
