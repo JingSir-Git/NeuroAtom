@@ -1,0 +1,71 @@
+# SSVEP Benchmark Dataset (Nakanishi et al. 2015 / Wang et al. 2016)
+# 35 subjects, 64 EEG channels, 250 Hz
+# 40 stimulation frequencies (8.0–15.8 Hz, 0.2 Hz step)
+
+dataset_id: "ssvep_benchmark"
+dataset_name: "SSVEP Benchmark"
+task_type: "ssvep"
+original_format: "mat"
+
+trial_definition:
+  mode: "trial"
+  anchor_events: null  # Events derived from trial structure in .mat
+  tmin: 0.0
+  tmax: 5.0   # 5 seconds of SSVEP stimulation
+  baseline_tmin: -0.5
+  baseline_tmax: 0.0
+
+# Frequency-based labels: event_id maps to stimulation frequency
+event_mapping:
+  1: "8.0Hz"
+  2: "8.2Hz"
+  3: "8.4Hz"
+  4: "8.6Hz"
+  5: "8.8Hz"
+  6: "9.0Hz"
+  7: "9.2Hz"
+  8: "9.4Hz"
+  9: "9.6Hz"
+  10: "9.8Hz"
+  11: "10.0Hz"
+  12: "10.2Hz"
+  13: "10.4Hz"
+  14: "10.6Hz"
+  15: "10.8Hz"
+  16: "11.0Hz"
+  17: "11.2Hz"
+  18: "11.4Hz"
+  19: "11.6Hz"
+  20: "11.8Hz"
+  21: "12.0Hz"
+  22: "12.2Hz"
+  23: "12.4Hz"
+  24: "12.6Hz"
+  25: "12.8Hz"
+  26: "13.0Hz"
+  27: "13.2Hz"
+  28: "13.4Hz"
+  29: "13.6Hz"
+  30: "13.8Hz"
+  31: "14.0Hz"
+  32: "14.2Hz"
+  33: "14.4Hz"
+  34: "14.6Hz"
+  35: "14.8Hz"
+  36: "15.0Hz"
+  37: "15.2Hz"
+  38: "15.4Hz"
+  39: "15.6Hz"
+  40: "15.8Hz"
+
+signal_unit: "uV"
+
+# SSVEP occipital channels of interest (for focused analysis)
+# Full channel set is 64 channels
+channel_type_overrides: {}
+exclude_channels: []
+
+# .mat specific
+mat_signal_key: "data"
+mat_label_key: "y"
+sampling_rate: 250.0

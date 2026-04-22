@@ -1,0 +1,42 @@
+# Task Configuration: KUL Auditory Attention Detection Dataset
+# Biesmans, W., Das, N., Francart, T., & Bertrand, A. (2016)
+# 16 subjects, 64 channels BioSemi, 128 Hz, preprocessed
+#
+# IMPORTANT: Proper cross-validation requires trial-level splitting.
+# Random sample-level CV leads to inflated accuracy due to trial bias.
+
+dataset_id: "kul_aad"
+dataset_name: "KUL Auditory Attention Detection"
+task_type: "auditory_attention_decoding"
+
+# Signal already preprocessed: HP-filtered at 0.5 Hz, downsampled to 128 Hz
+signal_unit: "uV"
+
+# Trial definition: each trial is a complete continuous segment
+trial_definition:
+  mode: "trial"
+  # No anchor events — each trial is one atom
+  # For windowed analysis use mode: "window"
+
+# For AAD: binary attention classification (left vs right ear)
+event_mapping:
+  L: "attend_left"
+  R: "attend_right"
+
+# BioSemi 64-channel cap — all channels are EEG
+channel_type_overrides: {}
+
+# No channels excluded
+exclude_channels: []
+
+# Dataset-specific metadata
+custom:
+  n_subjects: 16
+  n_trials_per_subject: 20
+  experiments_per_subject: 3
+  cap: "BioSemi64"
+  original_sampling_rate: 8192
+  preprocessing: "HP 0.5 Hz, downsampled to 128 Hz"
+  paradigm: "cocktail_party"
+  conditions: ["hrtf", "dry"]
+  citation: "Biesmans et al., IEEE TNSRE 2016"

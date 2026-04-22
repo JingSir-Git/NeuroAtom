@@ -1,0 +1,40 @@
+# Inner Speech Dataset (Nieto et al. 2021)
+# 10 subjects, 128 EEG channels (BioSemi), 256 Hz
+# BIDS format on OpenNeuro: ds003626
+# 4 conditions × 2 tasks (inner speech vs. pronounced speech vs. visualized)
+
+dataset_id: "inner_speech"
+dataset_name: "Inner Speech"
+task_type: "inner_speech"
+original_format: "bdf"
+
+trial_definition:
+  mode: "event_epoch"
+  event_windows:
+    "1": {tmin: 0.0, tmax: 3.5, label: "inner_up"}
+    "2": {tmin: 0.0, tmax: 3.5, label: "inner_down"}
+    "3": {tmin: 0.0, tmax: 3.5, label: "inner_left"}
+    "4": {tmin: 0.0, tmax: 3.5, label: "inner_right"}
+  default_tmin: 0.0
+  default_tmax: 3.5
+
+event_mapping:
+  1: "up"
+  2: "down"
+  3: "left"
+  4: "right"
+
+signal_unit: "V"
+
+channel_type_overrides:
+  "EXG1": "eog"
+  "EXG2": "eog"
+  "EXG3": "eog"
+  "EXG4": "eog"
+  "EXG5": "emg"
+  "EXG6": "emg"
+  "EXG7": "misc"
+  "EXG8": "misc"
+  "Status": "stim"
+
+exclude_channels: ["Status"]

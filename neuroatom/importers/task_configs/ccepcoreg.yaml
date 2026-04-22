@@ -1,0 +1,56 @@
+# Task Configuration: CCEP-COREG — simultaneous sEEG + HD-EEG
+# Parmigiani, Mikulan et al. (2022)
+# 36 subjects, 323 sessions, BIDS-derivative preprocessed epochs
+#
+# Paradigm: Cortico-Cortical Evoked Potentials (CCEP)
+# Intracranial stimulation through sEEG electrodes, recording evoked
+# responses on both high-density scalp EEG and sEEG simultaneously.
+#
+# Multi-modal: atoms have modality='eeg' or modality='ieeg'
+# Cross-modal pairing via AtomRelation(relation_type='cross_modal_paired_run')
+
+dataset_id: "ccepcoreg"
+dataset_name: "CCEP-COREG: Simultaneous sEEG and HD-EEG"
+task_type: "ccep"
+
+# Both modalities already in V (Volts)
+signal_unit: "V"
+
+# Epoch parameters (from epoch JSONs)
+# 1.0s total: 0.3s baseline + 0.7s post-stimulus
+# Baseline correction: mean subtraction over [-0.3, 0]
+
+trial_definition:
+  mode: "event_epoch"
+
+# Channel type overrides: not needed — channels.tsv has accurate type info
+channel_type_overrides: {}
+exclude_channels: []
+
+# Scalp EEG specifics
+# - 185 channels, HydroCel GSN (e1-e224, non-contiguous numbering)
+# - 0.5-45 Hz bandpass, 1000 Hz sampling, average reference
+
+# sEEG (iEEG) specifics
+# - 139-153 bipolar channels (patient-specific, e.g. K'1-2, R'6-7)
+# - 0.5-300 Hz bandpass, 1000 Hz sampling, bipolar reference
+# - Channel count varies across subjects (individual electrode placement)
+
+custom:
+  n_subjects: 36
+  n_sessions_total: 323
+  cap_eeg: "HydroCel GSN 256 (subset ~185 channels)"
+  electrode_manufacturer_ieeg: "Dixi Medical"
+  electrode_material_ieeg: "PtIr"
+  sampling_rate: 1000
+  eeg_bandpass: [0.5, 45]
+  ieeg_bandpass: [0.5, 300]
+  eeg_reference: "average"
+  ieeg_reference: "bipolar"
+  epoch_duration_s: 1.0
+  baseline_period_s: [-0.3, 0]
+  baseline_method: "mean_subtraction"
+  coordinate_spaces: ["MNI152NLin2009aSym", "T1w"]
+  has_mri: true
+  license: "CC-BY-NC-SA 4.0"
+  citation: "Parmigiani et al., Scientific Data 2022"

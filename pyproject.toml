@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuroatom"
+version = "0.1.0"
+description = "Universal EEG Resource Pool: decompose heterogeneous EEG datasets into standardized atomic units for unified ML pipeline integration."
+requires-python = ">=3.10"
+license = {text = "MIT"}
+readme = "README.md"
+authors = [
+    {name = "NeuroAtom Contributors"},
+]
+keywords = ["eeg", "bci", "neuroscience", "machine-learning", "brain-computer-interface"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+]
+
+# ── Core dependencies: minimal set required for pool, indexing, assembly ──
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "h5py>=3.9",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "filelock>=3.12",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+# Importer-specific deps — install only what you need
+mne = ["mne>=1.6"]                          # PhysioNet, SEED-V, BCI IV (EDF/GDF/CNT)
+bids = ["mne>=1.6", "mne-bids>=0.13"]       # CCEP-COREG BIDS importer
+eeglab = ["h5py>=3.9"]                      # Zuco 2.0 (EEGLAB HDF5)
+torch = ["torch>=2.0"]                      # DataLoader integration
+moabb = ["moabb>=1.0"]                      # MOABB dataset bridge
+
+# Convenience bundles
+all = [
+    "mne>=1.6",
+    "mne-bids>=0.13",
+    "torch>=2.0",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "scikit-learn>=1.3",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "mne>=1.6",
+    "torch>=2.0",
+    "pandas>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/JingSir-Git/NeuroAtom"
+Documentation = "https://github.com/JingSir-Git/NeuroAtom#readme"
+Issues = "https://github.com/JingSir-Git/NeuroAtom/issues"
+
+[project.scripts]
+neuroatom = "neuroatom.cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+neuroatom = ["configs/**/*", "importers/task_configs/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"

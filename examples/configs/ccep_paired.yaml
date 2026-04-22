@@ -1,0 +1,54 @@
+# NeuroAtom Multi-Modal Recipe: CCEP-COREG (EEG + sEEG paired)
+#
+# Usage:
+#   from neuroatom import MultiModalRecipe, MultiModalAssembler
+#   recipe = MultiModalRecipe.from_yaml("examples/configs/ccep_paired.yaml")
+#   result = MultiModalAssembler(pool, indexer).assemble(recipe)
+
+recipe_id: ccep_paired
+description: CCEP cortico-cortical evoked potentials - EEG and sEEG paired at run level
+
+# ── Modalities ───────────────────────────────────────────────────────
+modalities:
+  eeg:
+    query:
+      dataset_id: ccepcoreg
+      modality: eeg
+    target_sampling_rate: 1000.0
+    target_unit: uV
+    filter_band: [0.5, 45.0]
+    target_reference: average
+    normalization_method: zscore
+
+  ieeg:
+    query:
+      dataset_id: ccepcoreg
+      modality: ieeg
+    target_sampling_rate: 1000.0
+    target_unit: uV
+    filter_band: [0.5, 300.0]
+    normalization_method: zscore
+
+# ── Pairing ──────────────────────────────────────────────────────────
+# Run-level pairing: atoms matched by subject_id + session_id + run_id
+pairing_keys:
+  - subject_id
+  - session_id
+  - run_id
+
+# ── Labels ───────────────────────────────────────────────────────────
+primary_modality: eeg
+label_fields:
+  - annotation_name: stim_type
+    output_key: stim_type
+    encoding: ordinal
+
+# ── Split ────────────────────────────────────────────────────────────
+split_strategy: subject
+split_config:
+  val_ratio: 0.1
+  test_ratio: 0.2
+  seed: 42
+
+# ── Error handling ───────────────────────────────────────────────────
+error_handling: skip

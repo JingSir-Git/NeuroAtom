@@ -1,0 +1,25 @@
+# P300 Speller — Generic P300 BCI paradigm
+# Event IDs depend on specific dataset; this template provides
+# the most common convention.
+
+dataset_id: "p300_speller"
+dataset_name: "P300 Speller"
+task_type: "p300"
+original_format: "auto"
+
+trial_definition:
+  mode: "event_epoch"
+  event_windows:
+    "1": {tmin: -0.1, tmax: 0.8, label: "target"}
+    "2": {tmin: -0.1, tmax: 0.8, label: "non_target"}
+  default_tmin: -0.1
+  default_tmax: 0.8
+
+event_mapping:
+  1: "target"
+  2: "non_target"
+
+signal_unit: "uV"
+
+channel_type_overrides: {}
+exclude_channels: []

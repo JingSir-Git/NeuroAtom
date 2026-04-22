@@ -1,0 +1,27 @@
+# Lee et al. 2019 Motor Imagery Dataset
+# 54 subjects, 62 EEG channels, 1000 Hz
+# GDF format, 2-class (left hand vs. right hand)
+# Available via MOABB as Lee2019_MI or GigaDb
+
+dataset_id: "lee2019_mi"
+dataset_name: "Lee2019 Motor Imagery"
+task_type: "motor_imagery"
+original_format: "gdf"
+
+trial_definition:
+  mode: "trial"
+  anchor_events: [1, 2]
+  tmin: 0.0
+  tmax: 4.0
+  baseline_tmin: -2.0
+  baseline_tmax: 0.0
+
+event_mapping:
+  1: "left_hand"
+  2: "right_hand"
+
+signal_unit: "V"
+
+channel_type_overrides: {}
+
+exclude_channels: []

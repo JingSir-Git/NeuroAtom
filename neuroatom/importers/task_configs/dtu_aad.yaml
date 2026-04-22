@@ -1,0 +1,49 @@
+# Task Configuration: DTU Auditory Attention Detection Dataset
+# Fuglsang, S. A., Dau, T., & Hjortkjær, J. (2017)
+# 18 subjects, 64+EXG channels BioSemi, preprocessed to 64 Hz
+#
+# DATA_preproc version: 60 trials per subject, 50s each, 66 channels (64 EEG + EXG1 + EXG2)
+# Includes audio envelopes (wavA, wavB) aligned to EEG
+
+dataset_id: "dtu_aad"
+dataset_name: "DTU Auditory Attention Detection"
+task_type: "auditory_attention_decoding"
+
+# Preprocessed data is in µV
+signal_unit: "uV"
+
+# Trial definition: each trial is a complete 50s segment
+trial_definition:
+  mode: "trial"
+
+# For AAD: attended speaker classification
+event_mapping:
+  1: "attend_speaker_A"
+  2: "attend_speaker_B"
+
+# EXG channels as EOG (used for artifact rejection reference)
+channel_type_overrides:
+  EXG1: "eog"
+  EXG2: "eog"
+  EXG3: "eog"
+  EXG4: "eog"
+  EXG5: "eog"
+  EXG6: "eog"
+  EXG7: "eog"
+  EXG8: "eog"
+  Status: "stim"
+
+# Optionally exclude non-EEG channels for cleaner analysis
+exclude_channels: []
+
+# Dataset-specific metadata
+custom:
+  n_subjects: 18
+  n_trials_per_subject: 60
+  trial_duration_seconds: 50
+  cap: "BioSemi64"
+  original_sampling_rate: 512
+  preprocessing: "Band-pass filtered, downsampled to 64 Hz, artifact removal"
+  paradigm: "cocktail_party"
+  has_audio_envelopes: true
+  citation: "Fuglsang et al., JASA 2017"

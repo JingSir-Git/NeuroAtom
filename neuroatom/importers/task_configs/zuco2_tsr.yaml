@@ -1,0 +1,51 @@
+# Zuco 2.0 — Task-Specific Reading (TSR)
+# Hollenstein, N., et al. (2020). ZuCo 2.0: A Dataset of Physiological
+# Recordings During Natural Reading and Annotation.
+#
+# 18 subjects, 7 texts (TSR1–TSR7) per subject.
+# EGI HydroCel 128 → 105 EEG channels @ 500 Hz.
+# Preprocessed with Automagic pipeline (ICA artifact removal).
+# HDF5 (MATLAB v7.3) format, EEGLAB structure.
+#
+# Paradigm: natural sentence reading with eye tracking.
+# Each text has ~35-45 sentences displayed one at a time.
+# Events mark sentence onsets (type=10) and offsets (type=11).
+#
+# File prefixes:
+#   gip_*_EEG.mat: "good ICA points" — cleaned segments (primary)
+#   bip_*_EEG.mat: "bad ICA points" — artifact-contaminated segments
+#
+# Signal: µV (preprocessed), range ~[-2, 6], 500 Hz.
+# Channel names: EGI HydroCel (E2, E3, ..., E124, Cz).
+# 3D electrode coordinates available in chanlocs.
+
+dataset_id: zuco2_tsr
+dataset_name: "Zuco 2.0 Task-Specific Reading"
+task_type: reading
+format: hdf5_eeglab
+
+sampling_rate: 500
+n_channels: 105
+signal_unit: uV
+
+# Event type mapping
+events:
+  session_start: "110"
+  sentence_onset: "10"
+  sentence_offset: "11"
+  page_break: "12"
+  page_end: "13"
+
+# File prefix to use
+file_prefix: gip  # "good ICA points" — cleaned data
+
+# Texts
+n_texts: 7
+text_ids:
+  - TSR1
+  - TSR2
+  - TSR3
+  - TSR4
+  - TSR5
+  - TSR6
+  - TSR7

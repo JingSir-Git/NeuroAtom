@@ -1,0 +1,39 @@
+# ChineseEEG-2 Reading Aloud task config
+# Dataset: ChineseEEG-2 (Chen et al., 2024)
+# Paradigm: Reading aloud Chinese novel text
+# Format: BIDS BrainVision (.vhdr), 128ch EGI HydroCel @ 250Hz
+# Events: ROWS (sentence start), ROWE (sentence end), CH01 (chapter marker), BEGN (begin)
+# Atomization: Sentence-level epochs from ROWS→ROWE pairs
+
+dataset_id: chinese_eeg2_reading
+dataset_name: "ChineseEEG-2 Reading Aloud"
+task_type: language_production
+
+# Signal metadata
+signal_unit: V
+sampling_rate: 250.0
+n_channels: 128
+
+# Channel mapping
+channel_system: EGI_HydroCel_128
+exclude_channels: []
+
+# Atomization: sentence-level
+atomizer_type: sentence_epoch
+sentence_events:
+  start_marker: "ROWS"
+  end_marker: "ROWE"
+  chapter_marker: "CH01"
+  begin_marker: "BEGN"
+
+# Trial definition for windowed fallback
+trial_definition:
+  event_windows: {}
+  default_tmin: 0.0
+  default_tmax: 30.0  # reading can be slower
+
+# Metadata
+paradigm: reading_aloud
+novels:
+  - littleprince
+  - garnettdream

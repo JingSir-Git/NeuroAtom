@@ -1,0 +1,17 @@
+schema_version: "1.0.0"
+storage:
+  signal_backend: "hdf5"
+  compression: "gzip"
+  compression_level: 4
+  max_shard_size_mb: 200.0
+  chunk_size: null  # auto-determine
+
+metadata:
+  atom_format: "jsonl"  # one JSON per line per run
+
+import:
+  validate_on_import: true
+  amplitude_range_uv: [-500.0, 500.0]
+  min_channels: 1
+  skip_all_zero: true
+  skip_all_nan: true

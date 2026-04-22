@@ -1,0 +1,150 @@
+# PhysioNet EEG Motor Movement/Imagery Dataset (eegmmidb)
+# https://physionet.org/content/eegmmidb/1.0.0/
+#
+# 109 subjects, 14 runs each, EDF format.
+# 64 EEG channels (10-10 system) @ 160 Hz.
+#
+# Run structure:
+#   R01: Baseline, eyes open
+#   R02: Baseline, eyes closed
+#   R03, R07, R11: Task 1 — open/close left or right fist (execution)
+#   R04, R08, R12: Task 2 — imagine opening/closing left or right fist (imagery)
+#   R05, R09, R13: Task 3 — open/close both fists or both feet (execution)
+#   R06, R10, R14: Task 4 — imagine opening/closing both fists or both feet (imagery)
+#
+# Event codes (in EDF annotations):
+#   T0: rest
+#   T1: left fist / both fists (depending on task)
+#   T2: right fist / both feet (depending on task)
+#
+# IMPORTANT: T1/T2 semantics are run-dependent. This importer resolves them
+# to consistent class labels based on run number.
+#
+# Reference: Schalk, G., et al. (2004). BCI2000: A General-Purpose
+# Brain-Computer Interface (BCI) System. IEEE TBME, 51(6), 1034-1043.
+
+dataset_id: physionet_mi
+dataset_name: "PhysioNet EEG Motor Movement/Imagery"
+task_type: motor_imagery
+format: edf
+
+sampling_rate: 160
+n_channels: 64
+signal_unit: V
+
+# Epoch window: 0s to 4.0s from event onset (task period ~4.1s)
+epoch_tmin: 0.0
+epoch_tmax: 4.0
+epoch_samples: 641  # ceil(4.0 * 160) + 1
+
+# Channel names in the EDF files have trailing dots (e.g., 'Fc5.', 'C3..')
+# The importer strips these and standardizes to 10-10 names.
+channels:
+  - Fc5
+  - Fc3
+  - Fc1
+  - Fcz
+  - Fc2
+  - Fc4
+  - Fc6
+  - C5
+  - C3
+  - C1
+  - Cz
+  - C2
+  - C4
+  - C6
+  - Cp5
+  - Cp3
+  - Cp1
+  - Cpz
+  - Cp2
+  - Cp4
+  - Cp6
+  - Fp1
+  - Fpz
+  - Fp2
+  - Af7
+  - Af3
+  - Afz
+  - Af4
+  - Af8
+  - F7
+  - F5
+  - F3
+  - F1
+  - Fz
+  - F2
+  - F4
+  - F6
+  - F8
+  - Ft7
+  - Ft8
+  - T7
+  - T8
+  - T9
+  - T10
+  - Tp7
+  - Tp8
+  - P7
+  - P5
+  - P3
+  - P1
+  - Pz
+  - P2
+  - P4
+  - P6
+  - P8
+  - Po7
+  - Po3
+  - Poz
+  - Po4
+  - Po8
+  - O1
+  - Oz
+  - O2
+  - Iz
+
+# Run → task mapping
+# Each task has 3 repeat runs.
+run_tasks:
+  # Task 1: open/close left or right fist (execution)
+  task1_execution:
+    runs: [3, 7, 11]
+    T1: left_fist
+    T2: right_fist
+    paradigm: execution
+  # Task 2: imagine opening/closing left or right fist (imagery)
+  task2_imagery:
+    runs: [4, 8, 12]
+    T1: left_hand
+    T2: right_hand
+    paradigm: imagery
+  # Task 3: open/close both fists or both feet (execution)
+  task3_execution:
+    runs: [5, 9, 13]
+    T1: both_fists
+    T2: both_feet
+    paradigm: execution
+  # Task 4: imagine opening/closing both fists or both feet (imagery)
+  task4_imagery:
+    runs: [6, 10, 14]
+    T1: both_hands
+    T2: both_feet
+    paradigm: imagery
+
+# Baseline runs (no task events)
+baseline_runs:
+  eyes_open: [1]
+  eyes_closed: [2]
+
+# Class labels (unified across all tasks)
+class_labels:
+  left_fist: "Left fist open/close (execution)"
+  right_fist: "Right fist open/close (execution)"
+  left_hand: "Left hand imagery"
+  right_hand: "Right hand imagery"
+  both_fists: "Both fists open/close (execution)"
+  both_feet: "Both feet open/close (execution)"
+  both_hands: "Both hands imagery"
+  rest: "Rest period"

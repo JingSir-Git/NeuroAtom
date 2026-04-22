@@ -1,0 +1,41 @@
+# NeuroAtom Assembly Recipe: Motor Imagery 4-class (BCI IV 2a)
+#
+# Usage:
+#   from neuroatom import AssemblyRecipe, DatasetAssembler
+#   recipe = AssemblyRecipe.from_yaml("examples/configs/mi_4class_bci.yaml")
+#   result = assembler.assemble(recipe)
+
+recipe_id: mi_4class_bci
+description: Motor imagery 4-class from BCI IV 2a (all 9 subjects)
+
+# ── Source selection ──────────────────────────────────────────────────
+query:
+  dataset_id: bci_comp_iv_2a
+  annotations:
+    - name: mi_class
+
+# ── Signal processing pipeline ───────────────────────────────────────
+target_sampling_rate: 250.0
+target_duration: 4.0
+target_unit: uV
+filter_band: [0.5, 40.0]
+normalization_method: zscore
+normalization_scope: per_atom
+baseline_correction: mean
+baseline_before_normalize: true
+
+# ── Labels ───────────────────────────────────────────────────────────
+label_fields:
+  - annotation_name: mi_class
+    output_key: mi_class
+    encoding: ordinal
+
+# ── Split ────────────────────────────────────────────────────────────
+split_strategy: subject
+split_config:
+  val_ratio: 0.1
+  test_ratio: 0.2
+  seed: 42
+
+# ── Error handling ───────────────────────────────────────────────────
+error_handling: skip

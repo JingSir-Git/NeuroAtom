@@ -1,0 +1,104 @@
+# BCI Competition IV Dataset 2a — 4-class Motor Imagery
+# Brunner et al. (2008), Tangermann et al. (2012)
+# 9 subjects, 22 EEG + 3 EOG channels, 250 Hz
+#
+# Paradigm: cued motor imagery — subject imagines one of 4 movements
+# Trial structure: fixation(2s) → cue arrow(1.25s) → MI(variable) → rest
+# Inter-trial interval: ~7.5-8.5s
+#
+# Data available in GDF (original) or .mat (preprocessed) format.
+# This config supports BOTH formats.
+#
+# .mat structure (from BNCI Horizon 2020 toolbox):
+#   data: array of 9 run structs
+#     runs 0-2: calibration / eyes open / eyes closed (no labels)
+#     runs 3-8: 48 MI trials each (288 total per subject)
+#     each run: X (samples×25), y (48,), trial (48,), artifacts (48,),
+#               fs (250), classes (4,), age, gender
+#
+# GDF structure (original):
+#   events 769-772 = class cues, 768 = trial start, 783 = rejected
+
+dataset_id: "bci_comp_iv_2a"
+dataset_name: "BCI Competition IV Dataset 2a"
+task_type: "motor_imagery"
+
+trial_definition:
+  mode: "trial"
+  # GDF event codes for class cues
+  anchor_events: [769, 770, 771, 772]
+  tmin: 0.0      # Cue onset
+  tmax: 4.0      # 4 seconds of MI
+  baseline_tmin: -0.5
+  baseline_tmax: 0.0
+  # .mat-specific: trial duration in seconds (from cue onset)
+  mat_trial_duration_s: 6.0
+
+# Label mapping (works for both formats)
+event_mapping:
+  # GDF event codes → labels
+  769: "left_hand"
+  770: "right_hand"
+  771: "both_feet"
+  772: "tongue"
+
+# .mat y-value → label index mapping (1-indexed)
+class_labels:
+  1: "left_hand"
+  2: "right_hand"
+  3: "both_feet"
+  4: "tongue"
+
+# .mat data is already in µV; GDF in V (MNE loads as V)
+signal_unit: "uV"
+
+# Official 25-channel montage (from dataset description)
+# 22 EEG (10-20 system) + 3 EOG
+channel_names:
+  - "Fz"
+  - "FC3"
+  - "FC1"
+  - "FCz"
+  - "FC2"
+  - "FC4"
+  - "C5"
+  - "C3"
+  - "C1"
+  - "Cz"
+  - "C2"
+  - "C4"
+  - "C6"
+  - "CP3"
+  - "CP1"
+  - "CPz"
+  - "CP2"
+  - "CP4"
+  - "P1"
+  - "Pz"
+  - "P2"
+  - "POz"
+  - "EOG-left"
+  - "EOG-central"
+  - "EOG-right"
+
+channel_type_overrides:
+  "EOG-left": "eog"
+  "EOG-central": "eog"
+  "EOG-right": "eog"
+
+exclude_channels: []
+
+custom:
+  n_subjects: 9
+  n_runs_labelled: 6
+  n_trials_per_run: 48
+  n_trials_total: 288
+  n_classes: 4
+  sampling_rate: 250
+  reference: "left mastoid"
+  ground: "right mastoid"
+  bandpass_hz: [0.5, 100]
+  notch_hz: 50
+  cap: "not specified (22 EEG subset)"
+  license: "CC-BY-NC-SA 4.0"
+  citation: "Tangermann et al., Frontiers in Neuroscience 2012"

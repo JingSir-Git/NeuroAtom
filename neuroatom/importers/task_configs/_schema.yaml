@@ -1,0 +1,52 @@
+# NeuroAtom Task Config YAML Schema
+# Every dataset import requires a task config file that describes:
+# - Dataset identity and task type
+# - Trial definition (trial-based, event-based, or window-based)
+# - Event-to-label mapping
+# - Signal unit declaration (for formats where unit is not auto-detected)
+# - Channel type overrides and exclusions
+
+# Required fields:
+#   dataset_id: str          # Unique dataset identifier
+#   task_type: str            # Task paradigm type
+#   trial_definition:         # How to decompose recordings into atoms
+#     mode: "trial" | "event_epoch" | "window"
+
+# --- Trial mode ---
+# trial_definition:
+#   mode: "trial"
+#   anchor_events: [769, 770, 771, 772]   # Event IDs that define trial onsets
+#   tmin: 0.0                               # Seconds relative to event (can be negative)
+#   tmax: 4.0                               # Seconds relative to event
+#   baseline_tmin: -0.5                     # Optional baseline window
+#   baseline_tmax: 0.0
+
+# --- Event epoch mode ---
+# trial_definition:
+#   mode: "event_epoch"
+#   event_windows:
+#     769: {tmin: -0.2, tmax: 0.8, label: "target"}
+#     770: {tmin: -0.2, tmax: 0.8, label: "non_target"}
+#   default_tmin: -0.2
+#   default_tmax: 0.8
+
+# --- Window mode (continuous paradigms) ---
+# trial_definition:
+#   mode: "window"
+#   window_seconds: 5.0
+#   step_seconds: 2.5
+#   annotation_boundary: "include_if_onset"
+
+# Event mapping: event_id → label name
+# event_mapping:
+#   769: "left_hand"
+#   770: "right_hand"
+
+# Signal unit (for .mat or custom formats where unit is not auto-detected):
+# signal_unit: "uV"
+
+# Channel overrides:
+# channel_type_overrides:
+#   EOG1: "eog"
+#   EOG2: "eog"
+# exclude_channels: ["Status", "STI 014"]

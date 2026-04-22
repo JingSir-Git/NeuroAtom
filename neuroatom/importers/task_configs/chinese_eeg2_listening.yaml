@@ -1,0 +1,38 @@
+# ChineseEEG-2 Passive Listening task config
+# Dataset: ChineseEEG-2 (Chen et al., 2024)
+# Paradigm: Passive listening to Chinese novel audiobooks
+# Format: BIDS BrainVision (.vhdr), 128ch EGI HydroCel @ 1000Hz
+# Events: ROWS (sentence start), ROWE (sentence end), CH01 (chapter marker)
+# Atomization: Sentence-level epochs from ROWS→ROWE pairs
+
+dataset_id: chinese_eeg2_listening
+dataset_name: "ChineseEEG-2 Passive Listening"
+task_type: language_comprehension
+
+# Signal metadata
+signal_unit: V  # channels.tsv says V; MNE auto-converts from BrainVision scaling
+sampling_rate: 1000.0
+n_channels: 128
+
+# Channel mapping
+channel_system: EGI_HydroCel_128
+exclude_channels: []  # All 128 channels are EEG
+
+# Atomization: sentence-level
+atomizer_type: sentence_epoch
+sentence_events:
+  start_marker: "ROWS"     # trial_type in events.tsv for sentence start
+  end_marker: "ROWE"       # trial_type in events.tsv for sentence end
+  chapter_marker: "CH01"   # trial_type for chapter onset (metadata only)
+
+# Trial definition for windowed fallback
+trial_definition:
+  event_windows: {}
+  default_tmin: 0.0
+  default_tmax: 10.0  # max sentence duration safety net
+
+# Metadata
+paradigm: passive_listening
+novels:
+  - littleprince
+  - garnettdream

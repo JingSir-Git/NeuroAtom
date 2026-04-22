@@ -1,0 +1,111 @@
+# Channel name alias table for NeuroAtom
+# Format: StandardName: [list of known aliases]
+# All matching is case-insensitive.
+# Common prefixes ('EEG ', 'EEG-') are auto-stripped before lookup.
+
+# --- Frontal ---
+Fp1: ["FP1", "Fp1", "fp1"]
+Fp2: ["FP2", "Fp2", "fp2"]
+Fpz: ["FPz", "FPZ", "fpz"]
+AF3: ["af3", "AF3"]
+AF4: ["af4", "AF4"]
+AF7: ["af7", "AF7"]
+AF8: ["af8", "AF8"]
+AFz: ["AFz", "AFZ", "afz"]
+F1: ["f1"]
+F2: ["f2"]
+F3: ["f3"]
+F4: ["f4"]
+F5: ["f5"]
+F6: ["f6"]
+F7: ["f7"]
+F8: ["f8"]
+Fz: ["FZ", "fz"]
+
+# --- Fronto-Central ---
+FC1: ["fc1", "FC1"]
+FC2: ["fc2", "FC2"]
+FC3: ["fc3", "FC3"]
+FC4: ["fc4", "FC4"]
+FC5: ["fc5", "FC5"]
+FC6: ["fc6", "FC6"]
+FCz: ["FCZ", "fcz", "FCz"]
+
+# --- Fronto-Temporal ---
+FT7: ["ft7", "FT7"]
+FT8: ["ft8", "FT8"]
+FT9: ["ft9", "FT9"]
+FT10: ["ft10", "FT10"]
+
+# --- Central ---
+C1: ["c1"]
+C2: ["c2"]
+C3: ["c3"]
+C4: ["c4"]
+C5: ["c5"]
+C6: ["c6"]
+Cz: ["CZ", "cz"]
+
+# --- Central-Parietal ---
+CP1: ["cp1", "CP1"]
+CP2: ["cp2", "CP2"]
+CP3: ["cp3", "CP3"]
+CP4: ["cp4", "CP4"]
+CP5: ["cp5", "CP5"]
+CP6: ["cp6", "CP6"]
+CPz: ["CPZ", "cpz", "CPz"]
+
+# --- Temporal ---
+T3: ["t3", "T3"]
+T4: ["t4", "T4"]
+T5: ["t5", "T5"]
+T6: ["t6", "T6"]
+T7: ["t7", "T7"]
+T8: ["t8", "T8"]
+
+# --- Temporal-Parietal ---
+TP7: ["tp7", "TP7"]
+TP8: ["tp8", "TP8"]
+TP9: ["tp9", "TP9"]
+TP10: ["tp10", "TP10"]
+
+# --- Parietal ---
+P1: ["p1"]
+P2: ["p2"]
+P3: ["p3"]
+P4: ["p4"]
+P5: ["p5"]
+P6: ["p6"]
+P7: ["p7"]
+P8: ["p8"]
+P9: ["p9"]
+P10: ["p10"]
+Pz: ["PZ", "pz"]
+
+# --- Parieto-Occipital ---
+PO3: ["po3", "PO3"]
+PO4: ["po4", "PO4"]
+PO7: ["po7", "PO7"]
+PO8: ["po8", "PO8"]
+POz: ["POZ", "poz", "POz"]
+
+# --- Occipital ---
+O1: ["o1"]
+O2: ["o2"]
+Oz: ["OZ", "oz"]
+
+# --- Inion ---
+Iz: ["IZ", "iz"]
+
+# --- Mastoid / Reference ---
+A1: ["a1", "M1", "m1", "TP9"]
+A2: ["a2", "M2", "m2", "TP10"]
+
+# --- EOG ---
+HEOG: ["heog", "HEOG", "hEOG"]
+VEOG: ["veog", "VEOG", "vEOG"]
+EOG1: ["eog1", "EOG1"]
+EOG2: ["eog2", "EOG2"]
+
+# --- Special ---
+Nz: ["NZ", "nz", "nasion"]
