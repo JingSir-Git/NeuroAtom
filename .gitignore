@@ -38,6 +38,9 @@ coverage.xml
 *.hdf5
 my_pool/
 
+# Model checkpoints
+checkpoints/
+
 # Jupyter
 .ipynb_checkpoints/
 
