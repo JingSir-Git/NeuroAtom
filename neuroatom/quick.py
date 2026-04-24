@@ -243,6 +243,9 @@ _KNOWN_LABEL_FIELDS: Dict[str, str] = {
     "kul_aad": "attended_ear",
     "dtu_aad": "attended_speaker",
     "aad_mat": "attended_ear",
+    "openbmi_mi": "mi_class",
+    "openbmi_erp": "erp_class",
+    "openbmi_ssvep": "ssvep_class",
     "lee2019_mi": "mi_class",
     "p300_speller": "target",
     "ssvep_benchmark": "frequency",
@@ -320,6 +323,15 @@ def _do_import(importer, dataset: str, data_path: Path, subject: str, kwargs: di
         importer.import_dataset(
             bids_root=data_path,
             subjects=[subject] if subject != data_path.stem else None,
+            **kwargs,
+        )
+        return
+
+    # ── OpenBMI (MI / ERP / SSVEP) ─────────────────────────────────────
+    if dataset in ("openbmi_mi", "openbmi_erp", "openbmi_ssvep"):
+        importer.import_subject(
+            mat_path=data_path,
+            subject_id=subject,
             **kwargs,
         )
         return

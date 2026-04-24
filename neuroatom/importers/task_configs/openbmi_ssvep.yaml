@@ -1,0 +1,127 @@
+# OpenBMI — SSVEP (Steady-State Visual Evoked Potentials)
+# Lee et al., GigaScience 2019 (doi:10.1093/gigascience/giz002)
+# 54 subjects × 2 sessions, 62 EEG channels, 1000 Hz
+#
+# Paradigm: 4-class SSVEP — flicker at 4 frequencies (5.45, 6.67, 8.57, 12 Hz)
+# Stimulus directions: up, left, right, down
+# Trial structure: 4s epoch
+# 100 trials per session (25 per class)
+#
+# .mat structure:
+#   EEG_SSVEP_train / EEG_SSVEP_test: struct with fields
+#     smt:  (4000, 100, 62)    — segmented trials
+#     x:    (N, 62)             — continuous EEG
+#     fs:   1000
+#     y_dec:   (1, 100)         — class labels (1=up, 2=left, 3=right, 4=down)
+#     y_class: (1, 100)         — class label strings
+#     class:   (4, 2)           — [1, 'up'; 2, 'left'; 3, 'right'; 4, 'down']
+#     chan: (1, 62)              — channel names
+#
+# Signal unit: µV
+
+dataset_id: "openbmi_ssvep"
+dataset_name: "OpenBMI SSVEP"
+task_type: "ssvep"
+
+trial_definition:
+  mode: "pre_segmented"
+  field: "smt"
+  tmin: 0.0
+  tmax: 4.0
+
+class_labels:
+  1: "up"
+  2: "left"
+  3: "right"
+  4: "down"
+
+# SSVEP stimulus frequencies (Hz) mapped to class indices
+stimulus_frequencies:
+  1: 5.45
+  2: 6.67
+  3: 8.57
+  4: 12.0
+
+signal_unit: "uV"
+
+# Same 62-channel montage as MI and ERP
+channel_names:
+  - "Fp1"
+  - "Fp2"
+  - "F7"
+  - "F3"
+  - "Fz"
+  - "F4"
+  - "F8"
+  - "FC5"
+  - "FC1"
+  - "FC2"
+  - "FC6"
+  - "T7"
+  - "C3"
+  - "Cz"
+  - "C4"
+  - "T8"
+  - "TP9"
+  - "CP5"
+  - "CP1"
+  - "CP2"
+  - "CP6"
+  - "TP10"
+  - "P7"
+  - "P3"
+  - "Pz"
+  - "P4"
+  - "P8"
+  - "PO9"
+  - "O1"
+  - "Oz"
+  - "O2"
+  - "PO10"
+  - "FC3"
+  - "FC4"
+  - "C5"
+  - "C1"
+  - "C2"
+  - "C6"
+  - "CP3"
+  - "CPz"
+  - "CP4"
+  - "P1"
+  - "P2"
+  - "POz"
+  - "FT9"
+  - "FTT9h"
+  - "TTP7h"
+  - "TP7"
+  - "TPP9h"
+  - "FT10"
+  - "FTT10h"
+  - "TPP8h"
+  - "TP8"
+  - "TPP10h"
+  - "F9"
+  - "F10"
+  - "AF7"
+  - "AF3"
+  - "AF4"
+  - "AF8"
+  - "PO3"
+  - "PO4"
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 54
+  n_sessions: 2
+  n_trials_per_session: 100
+  n_classes: 4
+  sampling_rate: 1000
+  epoch_samples: 4000
+  reference: "FCz"
+  ground: "AFz"
+  amplifier: "BrainAmp DC (Brain Products)"
+  cap: "actiCAP (62 channels)"
+  license: "CC0 1.0"
+  citation: "Lee et al., GigaScience 2019"

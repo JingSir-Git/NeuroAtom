@@ -35,6 +35,7 @@ def _ensure_all_registered() -> None:
         "neuroatom.importers.zuco2",
         "neuroatom.importers.ccep_bids_npy",
         "neuroatom.importers.chinese_eeg2",
+        "neuroatom.importers.openbmi",
         "neuroatom.importers.aad_mat",
         "neuroatom.importers.bids",
         "neuroatom.importers.eeglab",

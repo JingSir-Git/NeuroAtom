@@ -1,0 +1,123 @@
+# OpenBMI — 2-class Motor Imagery
+# Lee et al., GigaScience 2019 (doi:10.1093/gigascience/giz002)
+# 54 subjects × 2 sessions, 62 EEG channels, 1000 Hz
+#
+# Paradigm: cued motor imagery — right hand vs left hand
+# Trial structure: 4s epoch from cue onset
+# 100 trials per session (50 per class), pre-segmented in .mat
+#
+# .mat structure:
+#   EEG_MI_train / EEG_MI_test: struct with fields
+#     smt:  (4000, 100, 62)  — segmented trials (samples × trials × channels)
+#     x:    (N, 62)           — continuous EEG
+#     t:    (1, 100)          — trial onset indices
+#     fs:   1000              — sampling rate
+#     y_dec:   (1, 100)       — class labels (1=right, 2=left)
+#     y_class: (1, 100)       — class label strings
+#     class:   (2, 2)         — class mapping: [1, 'right'; 2, 'left']
+#     chan: (1, 62)            — channel name strings
+#     ival: (1, 4000)         — sample indices within epoch
+#     time_interval: [0, 4000]
+#     EMG:       (N, 4)       — EMG channels (not imported)
+#     EMG_index: (1, 4)       — EMG channel names
+#     pre_rest:  (60000, 62)  — 60s pre-experiment rest
+#     post_rest: (60000, 62)  — 60s post-experiment rest
+#
+# Signal unit: µV (BrainVision amplifier, BrainAmp DC)
+
+dataset_id: "openbmi_mi"
+dataset_name: "OpenBMI Motor Imagery"
+task_type: "motor_imagery"
+
+trial_definition:
+  mode: "pre_segmented"
+  field: "smt"
+  tmin: 0.0
+  tmax: 4.0
+
+class_labels:
+  1: "right_hand"
+  2: "left_hand"
+
+signal_unit: "uV"
+
+channel_names:
+  - "Fp1"
+  - "Fp2"
+  - "F7"
+  - "F3"
+  - "Fz"
+  - "F4"
+  - "F8"
+  - "FC5"
+  - "FC1"
+  - "FC2"
+  - "FC6"
+  - "T7"
+  - "C3"
+  - "Cz"
+  - "C4"
+  - "T8"
+  - "TP9"
+  - "CP5"
+  - "CP1"
+  - "CP2"
+  - "CP6"
+  - "TP10"
+  - "P7"
+  - "P3"
+  - "Pz"
+  - "P4"
+  - "P8"
+  - "PO9"
+  - "O1"
+  - "Oz"
+  - "O2"
+  - "PO10"
+  - "FC3"
+  - "FC4"
+  - "C5"
+  - "C1"
+  - "C2"
+  - "C6"
+  - "CP3"
+  - "CPz"
+  - "CP4"
+  - "P1"
+  - "P2"
+  - "POz"
+  - "FT9"
+  - "FTT9h"
+  - "TTP7h"
+  - "TP7"
+  - "TPP9h"
+  - "FT10"
+  - "FTT10h"
+  - "TPP8h"
+  - "TP8"
+  - "TPP10h"
+  - "F9"
+  - "F10"
+  - "AF7"
+  - "AF3"
+  - "AF4"
+  - "AF8"
+  - "PO3"
+  - "PO4"
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 54
+  n_sessions: 2
+  n_trials_per_session: 100
+  n_classes: 2
+  sampling_rate: 1000
+  epoch_samples: 4000
+  reference: "FCz"
+  ground: "AFz"
+  amplifier: "BrainAmp DC (Brain Products)"
+  cap: "actiCAP (62 channels)"
+  license: "CC0 1.0"
+  citation: "Lee et al., GigaScience 2019"
