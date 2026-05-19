@@ -7,11 +7,9 @@ Design:
 - Migrations must be idempotent (safe to re-run)
 
 Version history:
-    0.1.0 — Initial release (current)
-
-Future migrations will be registered here as the schema evolves.
-This stub ensures the infrastructure exists before any real migrations
-are needed.
+    0.1.0 — Initial release
+    0.2.0 — Indexer records ``jsonl_byte_offset`` for O(1) atom lookups.
+            Migration auto-reindexes pools created with 0.1.0.
 """
 
 import logging
@@ -23,7 +21,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 # Current schema version
-CURRENT_SCHEMA_VERSION = "0.1.0"
+CURRENT_SCHEMA_VERSION = "0.2.0"
 
 # Registry: (from_version, to_version) → migration function
 _MIGRATIONS: Dict[Tuple[str, str], Callable[[Path], None]] = {}
@@ -183,13 +181,39 @@ def list_available_migrations() -> List[Tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Future migrations will be registered below. Example:
-#
-# @register_migration("0.1.0", "0.2.0")
-# def migrate_0_1_to_0_2(pool_root: Path) -> None:
-#     \"\"\"Add 'data_version' field to all atom JSONL files.\"\"\"
-#     # 1. Walk all atoms.jsonl files
-#     # 2. Read each atom, add missing field with default
-#     # 3. Rewrite atomically
-#     pass
+# Registered migrations
 # ---------------------------------------------------------------------------
+
+
+@register_migration("0.1.0", "0.2.0")
+def migrate_0_1_to_0_2(pool_root: Path) -> None:
+    """Populate the ``jsonl_byte_offset`` column for atoms indexed under 0.1.0.
+
+    The 0.2.0 indexer captures each atom's byte offset in its run's JSONL,
+    enabling O(1) random reads in the assembler. Pools indexed under 0.1.0
+    have NULL offsets; the runtime falls back to linear scans, but that's
+    slow. This migration re-runs the indexer so future reads are fast.
+
+    Idempotent: re-running on an already-migrated pool is harmless — the
+    indexer's incremental path detects unchanged JSONL hashes and skips.
+    """
+    # Avoid circular import at module load time.
+    from neuroatom.index.indexer import Indexer
+    from neuroatom.storage.pool import Pool
+
+    if not (pool_root / "pool.yaml").exists():
+        logger.info(
+            "Pool at %s has no pool.yaml — skipping byte-offset reindex.",
+            pool_root,
+        )
+        return
+
+    pool = Pool.open(pool_root)
+    indexer = Indexer(pool)
+    try:
+        n = indexer.reindex_all()
+        logger.info(
+            "0.1.0→0.2.0: re-indexed %d atoms to populate byte offsets.", n,
+        )
+    finally:
+        indexer.close()

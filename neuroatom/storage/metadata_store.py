@@ -90,7 +90,15 @@ class AtomJSONLWriter:
 
 
 class AtomJSONLReader:
-    """Reader for atom JSONL files."""
+    """Reader for atom JSONL files.
+
+    Supports two access modes:
+    - **Linear**: iter_atoms / read_all — read every line in order. Used at
+      indexing time when the byte offsets are not yet known.
+    - **Random**: read_at_offset(off) — seek directly to a known byte offset
+      and parse a single atom. Used by the assembler's hot path to avoid the
+      O(N·M) full-scan in DatasetAssembler._load_atoms_by_ids.
+    """
 
     def __init__(self, path: Path):
         self._path = path
@@ -133,6 +141,66 @@ class AtomJSONLReader:
                         "Failed to parse atom at line %d in %s: %s",
                         line_num, self._path, e,
                     )
+
+    def iter_atoms_with_offset(self):
+        """Yield ``(atom, byte_offset)`` pairs.
+
+        The offset is the byte position where the atom's JSONL line *starts*
+        (i.e. the value to pass to :meth:`read_at_offset`). Indexers should
+        use this when building the SQLite ``jsonl_byte_offset`` column.
+
+        Must open the file in binary mode so that ``tell()`` returns byte
+        offsets that survive any text encoding (multibyte UTF-8 channel
+        names etc.).
+        """
+        if not self._path.exists():
+            return
+        with open(self._path, "rb") as f:
+            offset = 0
+            while True:
+                line = f.readline()
+                if not line:
+                    break
+                line_offset = offset
+                offset = f.tell()
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    data = json.loads(stripped.decode("utf-8"))
+                    yield Atom.model_validate(data), line_offset
+                except Exception as e:
+                    logger.warning(
+                        "Failed to parse atom at offset %d in %s: %s",
+                        line_offset, self._path, e,
+                    )
+
+    def read_at_offset(self, offset: int) -> Optional[Atom]:
+        """Read a single atom whose JSONL line starts at ``offset``.
+
+        Returns ``None`` if the file is missing, the offset is past EOF,
+        the line is blank, or parsing fails. Designed for random-access
+        reads in the assembly hot path.
+        """
+        if not self._path.exists():
+            return None
+        try:
+            with open(self._path, "rb") as f:
+                f.seek(offset)
+                line = f.readline()
+                if not line:
+                    return None
+                stripped = line.strip()
+                if not stripped:
+                    return None
+                data = json.loads(stripped.decode("utf-8"))
+                return Atom.model_validate(data)
+        except Exception as e:
+            logger.warning(
+                "Failed to read atom at offset %d in %s: %s",
+                offset, self._path, e,
+            )
+            return None
 
     def count(self) -> int:
         """Count atoms without full deserialization."""

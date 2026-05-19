@@ -484,41 +484,86 @@ class DatasetAssembler:
     # ------------------------------------------------------------------
 
     def _load_atoms_by_ids(self, atom_ids: List[str]) -> List[Atom]:
-        """Load full Atom objects from JSONL files by their IDs."""
-        # Build index: atom_id → run location
-        conn = self._indexer.backend.conn
-        rows = conn.execute(
-            "SELECT atom_id, dataset_id, subject_id, session_id, run_id FROM atoms "
-            f"WHERE atom_id IN ({','.join('?' * len(atom_ids))})",
-            tuple(atom_ids),
-        ).fetchall()
+        """Load full Atom objects from JSONL files by their IDs.
 
-        # Group by run
-        run_atoms: Dict[str, List[str]] = {}
-        atom_locations: Dict[str, Tuple[str, str, str, str]] = {}
+        Fast path: when SQLite has the ``jsonl_byte_offset`` column populated
+        (post-Sprint-5 indexing), each atom is fetched via a single
+        ``seek`` + ``readline`` — O(1) per atom instead of O(N) per atom.
+
+        Fallback: for atoms whose offsets are NULL (e.g. indexed by an older
+        version), the run's JSONL is scanned once linearly and the missing
+        atoms are picked out of that scan. This preserves correctness when
+        upgrading without re-indexing, at the cost of the original O(N·M).
+        """
+        if not atom_ids:
+            return []
+
+        conn = self._indexer.backend.conn
+
+        # SQLite has a hard limit on parameters per statement (~32k). Chunk
+        # the IN-list to stay well below it.
+        chunk_size = 900
+        rows = []
+        for i in range(0, len(atom_ids), chunk_size):
+            chunk = atom_ids[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            chunk_rows = conn.execute(
+                "SELECT atom_id, dataset_id, subject_id, session_id, run_id, "
+                "       jsonl_byte_offset "
+                f"FROM atoms WHERE atom_id IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            rows.extend(chunk_rows)
+
+        # Group by run for the fallback scan path; collect (atom_id, offset)
+        # pairs for the fast path.
+        fast_path: List[Tuple[str, str, str, str, str, int]] = []
+        scan_targets: Dict[Tuple[str, str, str, str], set] = {}
+
         for r in rows:
-            run_key = f"{r['dataset_id']}|{r['subject_id']}|{r['session_id']}|{r['run_id']}"
-            if run_key not in run_atoms:
-                run_atoms[run_key] = []
-            run_atoms[run_key].append(r["atom_id"])
-            atom_locations[r["atom_id"]] = (
+            location = (
                 r["dataset_id"], r["subject_id"], r["session_id"], r["run_id"]
             )
+            offset = r["jsonl_byte_offset"]
+            if offset is not None:
+                fast_path.append((r["atom_id"], *location, offset))
+            else:
+                scan_targets.setdefault(location, set()).add(r["atom_id"])
 
-        # Load atoms from JSONL
-        target_ids = set(atom_ids)
-        result = []
+        result: List[Atom] = []
 
-        for run_key, ids in run_atoms.items():
-            parts = run_key.split("|")
-            ds_id, sub_id, ses_id, run_id = parts
+        # ── Fast path: random-access via byte offset ──────────────────────
+        # Cache one reader per JSONL path; reads inside the loop are cheap.
+        readers: Dict[Path, AtomJSONLReader] = {}
+        for atom_id, ds_id, sub_id, ses_id, run_id, offset in fast_path:
+            jsonl_path = P.atoms_jsonl_path(
+                self._pool.root, ds_id, sub_id, ses_id, run_id
+            )
+            reader = readers.get(jsonl_path)
+            if reader is None:
+                reader = AtomJSONLReader(jsonl_path)
+                readers[jsonl_path] = reader
+            atom = reader.read_at_offset(offset)
+            if atom is not None:
+                result.append(atom)
+
+        # ── Fallback path: one linear scan per run for legacy indices ─────
+        for (ds_id, sub_id, ses_id, run_id), id_set in scan_targets.items():
             jsonl_path = P.atoms_jsonl_path(
                 self._pool.root, ds_id, sub_id, ses_id, run_id
             )
             reader = AtomJSONLReader(jsonl_path)
             for atom in reader.iter_atoms():
-                if atom.atom_id in target_ids:
+                if atom.atom_id in id_set:
                     result.append(atom)
+
+        if scan_targets:
+            logger.warning(
+                "Loaded %d atoms via the legacy linear-scan path "
+                "(jsonl_byte_offset was NULL). Run `Indexer.reindex_all()` "
+                "to populate offsets for these atoms.",
+                sum(len(s) for s in scan_targets.values()),
+            )
 
         return result
 

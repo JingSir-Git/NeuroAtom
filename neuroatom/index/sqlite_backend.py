@@ -38,24 +38,25 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE TABLE IF NOT EXISTS atoms (
-    atom_id           TEXT PRIMARY KEY,
-    atom_type         TEXT NOT NULL,
-    dataset_id        TEXT NOT NULL,
-    subject_id        TEXT NOT NULL,
-    session_id        TEXT,
-    run_id            TEXT,
-    trial_index       INTEGER,
-    n_channels        INTEGER NOT NULL,
-    sampling_rate     REAL NOT NULL,
-    duration_samples  INTEGER NOT NULL,
-    duration_seconds  REAL NOT NULL,
-    onset_sample      INTEGER NOT NULL,
-    onset_seconds     REAL NOT NULL,
-    modality          TEXT,
-    quality_status    TEXT,
-    source_version    TEXT,
-    signal_file_path  TEXT,
-    shard_index       INTEGER
+    atom_id            TEXT PRIMARY KEY,
+    atom_type          TEXT NOT NULL,
+    dataset_id         TEXT NOT NULL,
+    subject_id         TEXT NOT NULL,
+    session_id         TEXT,
+    run_id             TEXT,
+    trial_index        INTEGER,
+    n_channels         INTEGER NOT NULL,
+    sampling_rate      REAL NOT NULL,
+    duration_samples   INTEGER NOT NULL,
+    duration_seconds   REAL NOT NULL,
+    onset_sample       INTEGER NOT NULL,
+    onset_seconds      REAL NOT NULL,
+    modality           TEXT,
+    quality_status     TEXT,
+    source_version     TEXT,
+    signal_file_path   TEXT,
+    shard_index        INTEGER,
+    jsonl_byte_offset  INTEGER  -- byte position of this atom's line in the run's atoms.jsonl
 );
 
 CREATE TABLE IF NOT EXISTS channels (
@@ -134,6 +135,22 @@ class SQLiteBackend:
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_DDL)
 
+        # Schema migration: older DBs (pre-byte-offset) need ALTER TABLE.
+        # CREATE TABLE IF NOT EXISTS is a no-op for existing tables, so the
+        # new column does NOT appear automatically; check and add it here.
+        existing_cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(atoms)").fetchall()
+        }
+        if "jsonl_byte_offset" not in existing_cols:
+            self._conn.execute(
+                "ALTER TABLE atoms ADD COLUMN jsonl_byte_offset INTEGER"
+            )
+            logger.info(
+                "Migrated atoms table: added jsonl_byte_offset column. "
+                "Run `reindex_all` to populate offsets for existing atoms."
+            )
+
         # Store schema version
         self._conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
@@ -164,8 +181,15 @@ class SQLiteBackend:
     # Insert / upsert
     # ------------------------------------------------------------------
 
-    def upsert_atom(self, atom: Atom) -> None:
-        """Insert or replace an atom and its channels/annotations in the index."""
+    def upsert_atom(self, atom: Atom, jsonl_byte_offset: Optional[int] = None) -> None:
+        """Insert or replace an atom and its channels/annotations in the index.
+
+        Args:
+            atom: The atom to upsert.
+            jsonl_byte_offset: Byte position of this atom's line in its run's
+                atoms.jsonl file. When provided, enables O(1) random reads
+                in the assembly hot path. ``None`` falls back to scanning.
+        """
         conn = self.conn
 
         # Atom row
@@ -175,8 +199,9 @@ class SQLiteBackend:
                 atom_id, atom_type, dataset_id, subject_id, session_id, run_id,
                 trial_index, n_channels, sampling_rate,
                 duration_samples, duration_seconds, onset_sample, onset_seconds,
-                modality, quality_status, source_version, signal_file_path, shard_index
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                modality, quality_status, source_version, signal_file_path, shard_index,
+                jsonl_byte_offset
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 atom.atom_id,
@@ -197,6 +222,7 @@ class SQLiteBackend:
                 atom.processing_history.version_tag,
                 atom.signal_ref.file_path,
                 atom.signal_ref.shard_index,
+                jsonl_byte_offset,
             ),
         )
 
@@ -246,10 +272,28 @@ class SQLiteBackend:
                 ),
             )
 
-    def upsert_atoms(self, atoms: List[Atom]) -> None:
-        """Batch insert/replace atoms."""
-        for atom in atoms:
-            self.upsert_atom(atom)
+    def upsert_atoms(
+        self,
+        atoms: List[Atom],
+        byte_offsets: Optional[List[Optional[int]]] = None,
+    ) -> None:
+        """Batch insert/replace atoms.
+
+        Args:
+            atoms: Atoms to upsert.
+            byte_offsets: Optional list of byte offsets aligned with ``atoms``;
+                each entry is the starting byte position of that atom's line
+                in its run's atoms.jsonl. If ``None``, all offsets are set to
+                ``NULL`` (the assembler will fall back to linear scan).
+        """
+        if byte_offsets is not None and len(byte_offsets) != len(atoms):
+            raise ValueError(
+                f"byte_offsets length ({len(byte_offsets)}) "
+                f"does not match atoms length ({len(atoms)})."
+            )
+        for idx, atom in enumerate(atoms):
+            off = byte_offsets[idx] if byte_offsets is not None else None
+            self.upsert_atom(atom, jsonl_byte_offset=off)
         self.conn.commit()
 
     def upsert_channel_standard_names(

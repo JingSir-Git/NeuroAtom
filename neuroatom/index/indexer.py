@@ -119,7 +119,13 @@ class Indexer:
             return 0
 
         reader = AtomJSONLReader(jsonl_path)
-        atoms = reader.read_all()
+        # Capture byte offsets alongside atoms so the assembler can do O(1)
+        # random reads instead of O(N·M) full scans.
+        atoms: List = []
+        offsets: List = []
+        for atom, offset in reader.iter_atoms_with_offset():
+            atoms.append(atom)
+            offsets.append(offset)
 
         if not atoms:
             return 0
@@ -127,8 +133,8 @@ class Indexer:
         # Load channel infos for standard_name resolution
         channel_map = self._load_channel_map(dataset_id, subject_id, session_id)
 
-        # Batch upsert
-        self._backend.upsert_atoms(atoms)
+        # Batch upsert with byte offsets
+        self._backend.upsert_atoms(atoms, byte_offsets=offsets)
 
         # Update standard names if channel map available
         if channel_map:

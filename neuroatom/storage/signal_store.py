@@ -7,10 +7,17 @@ Design principles:
   if the shard was empty before the write, always accept (single atom > threshold)
 - All file_path values in SignalRef are RELATIVE to pool_root
 - Atomic write safety: .tmp files for new shards, flush() for append
+
+Read-path concurrency:
+- static_read() uses a thread-local LRU handle cache so tight assembly loops
+  do not pay the open/close cost on every atom. Workers in a multiprocess
+  DataLoader each get their own thread-local cache via worker_init_fn.
 """
 
 import logging
 import os
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -24,6 +31,71 @@ logger = logging.getLogger(__name__)
 
 # Schema version embedded in every shard file
 SHARD_SCHEMA_VERSION = "1.0.0"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Thread-local read-handle cache
+#
+# Why thread-local instead of global: h5py.File handles are not safe to share
+# across processes after fork(), and even within a single process concurrent
+# access through one handle is fragile. A per-thread cache trades a tiny bit
+# of memory for ~10× faster repeated reads from the same shard during
+# DatasetAssembler's hot loop.
+#
+# Cache size is intentionally small (8 handles) — typical assembly touches
+# 1–4 shards per dataset; 8 handles cover the multi-dataset case without
+# unbounded growth.
+# ──────────────────────────────────────────────────────────────────────────
+
+_READ_CACHE_SIZE = 8
+_handle_cache_tls = threading.local()
+
+
+def _get_read_handle_cache() -> "OrderedDict[str, h5py.File]":
+    """Return this thread's HDF5 read-handle cache, creating it on first use."""
+    cache = getattr(_handle_cache_tls, "cache", None)
+    if cache is None:
+        cache = OrderedDict()
+        _handle_cache_tls.cache = cache
+    return cache
+
+
+def _open_read_handle(abs_path: Path) -> h5py.File:
+    """Return a cached read-only h5py.File for ``abs_path`` (per-thread)."""
+    cache = _get_read_handle_cache()
+    key = str(abs_path)
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+
+    h5 = h5py.File(abs_path, "r")
+    cache[key] = h5
+
+    # Evict LRU entries beyond cache size
+    while len(cache) > _READ_CACHE_SIZE:
+        _, old = cache.popitem(last=False)
+        try:
+            old.close()
+        except Exception:
+            pass
+
+    return h5
+
+
+def close_read_handles() -> None:
+    """Close all cached read handles for the current thread.
+
+    Call this in DataLoader ``worker_init_fn`` (after fork) and in test
+    teardown to release file descriptors deterministically.
+    """
+    cache = getattr(_handle_cache_tls, "cache", None)
+    if not cache:
+        return
+    for h5 in cache.values():
+        try:
+            h5.close()
+        except Exception:
+            pass
+    cache.clear()
 
 
 class ShardManager:
@@ -186,7 +258,12 @@ class ShardManager:
 
     @staticmethod
     def static_read(pool_root: Path, signal_ref: SignalRef) -> np.ndarray:
-        """Read signal without instantiating a ShardManager."""
+        """Read signal without instantiating a ShardManager.
+
+        Uses a per-thread LRU handle cache (see module docstring). Repeated
+        reads from the same shard reuse the open file handle, which is a
+        large speedup in tight assembly loops.
+        """
         abs_path = Path(pool_root) / signal_ref.file_path
         if not abs_path.exists():
             raise FileNotFoundError(
@@ -195,14 +272,14 @@ class ShardManager:
                 f"  pool_root = {pool_root}\n"
                 f"Ensure the pool directory is intact and the atom was imported correctly."
             )
-        with h5py.File(abs_path, "r") as h5:
-            if signal_ref.internal_path not in h5:
-                raise KeyError(
-                    f"Internal HDF5 path '{signal_ref.internal_path}' not found in {abs_path}. "
-                    f"Available top-level keys: {list(h5.keys())}. "
-                    f"The shard file may be corrupted or the atom's signal_ref is stale."
-                )
-            return h5[signal_ref.internal_path][:]
+        h5 = _open_read_handle(abs_path)
+        if signal_ref.internal_path not in h5:
+            raise KeyError(
+                f"Internal HDF5 path '{signal_ref.internal_path}' not found in {abs_path}. "
+                f"Available top-level keys: {list(h5.keys())}. "
+                f"The shard file may be corrupted or the atom's signal_ref is stale."
+            )
+        return h5[signal_ref.internal_path][:]
 
     # ------------------------------------------------------------------
     # Public API: lifecycle
