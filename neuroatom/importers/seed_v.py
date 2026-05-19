@@ -352,7 +352,30 @@ class SEEDVImporter(BaseImporter):
                             name="session",
                             value=f"session_{session_num}",
                         ),
+                        # Within-session stimulus ordinal. Each SEED-V session
+                        # shows 15 video clips in a fixed order; this index
+                        # lets cross-subject analyses align by clip.
+                        NumericAnnotation(
+                            annotation_id=f"ann_stim_idx_{run_id}_{trial_idx:04d}",
+                            name="stimulus_index",
+                            numeric_value=float(trial_idx),
+                        ),
                     ]
+
+                    # Optional human-readable clip ID, if the YAML config
+                    # supplies a per-session stimulus_order list (e.g. clip
+                    # filenames from emotion_label_and_stimuli_order.xlsx).
+                    stim_order = (
+                        self.task_config.data
+                        .get("stimulus_order", {})
+                        .get(f"session_{session_num}", [])
+                    )
+                    if trial_idx < len(stim_order):
+                        annotations.append(CategoricalAnnotation(
+                            annotation_id=f"ann_stim_id_{run_id}_{trial_idx:04d}",
+                            name="stimulus_id",
+                            value=str(stim_order[trial_idx]),
+                        ))
 
                     atom_id = compute_atom_id(
                         dataset_id=dataset_id,

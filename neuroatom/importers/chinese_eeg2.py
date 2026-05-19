@@ -49,8 +49,9 @@ from neuroatom.core.atom import Atom, TemporalInfo
 from neuroatom.core.channel import ChannelInfo
 from neuroatom.core.dataset_meta import DatasetMeta
 from neuroatom.core.electrode import ElectrodeLocation
-from neuroatom.core.enums import AtomType, ChannelType
+from neuroatom.core.enums import AtomType, ChannelStatus, ChannelType, QualityStatus
 from neuroatom.core.provenance import ProcessingHistory, ProcessingStep
+from neuroatom.core.quality import QualityInfo
 from neuroatom.core.session import SessionMeta
 from neuroatom.core.signal_ref import SignalRef
 from neuroatom.core.subject import SubjectMeta
@@ -433,13 +434,15 @@ class ChineseEEG2Importer:
         eeg_ch_names = [ci.name for ci in ch_infos if ci.type == ChannelType.EEG]
         eeg_picks = mne.pick_channels(raw.ch_names, eeg_ch_names, ordered=True)
 
-        # Bad channels
-        bad_channels = []
+        # Bad channels — mark matching ChannelInfo entries as BAD if a derivatives JSON is available.
         if rec.get("bad_channels_json"):
             try:
                 with open(rec["bad_channels_json"], "r") as f:
                     bad_data = json.load(f)
-                bad_channels = bad_data.get("bad channels", [])
+                bad_set = set(bad_data.get("bad channels", []))
+                for ci in ch_infos:
+                    if ci.name in bad_set:
+                        ci.status = ChannelStatus.BAD
             except Exception:
                 pass
 
@@ -474,6 +477,14 @@ class ChineseEEG2Importer:
         # Store atoms
         channel_ids = [ci.channel_id for ci in ch_infos if ci.type == ChannelType.EEG]
         n_channels = len(channel_ids)
+        # Collect per-run bad-channel list (from the derivatives JSON read above).
+        # Surfaced on each atom's QualityInfo so downstream consumers can
+        # exclude bad channels without re-parsing run-level metadata.
+        bad_channel_ids = [
+            ci.channel_id
+            for ci in ch_infos
+            if ci.type == ChannelType.EEG and ci.status == ChannelStatus.BAD
+        ]
         all_warnings = []
         atoms = []
 
@@ -582,6 +593,13 @@ class ChineseEEG2Importer:
                             "sentence_index": epoch["sentence_index"],
                             "paradigm": "passive_listening" if self.task == "listening" else "reading_aloud",
                         },
+                        # Propagate run-level bad-channel list into per-atom
+                        # quality info. Empty list (no JSON) leaves overall_status
+                        # as GOOD; non-empty triggers GOOD-with-some-bad semantics.
+                        quality=QualityInfo(
+                            overall_status=QualityStatus.GOOD,
+                            bad_channels=bad_channel_ids,
+                        ) if bad_channel_ids else None,
                     )
 
                     # Validate (first 5s)

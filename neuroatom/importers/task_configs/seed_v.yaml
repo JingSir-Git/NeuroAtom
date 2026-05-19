@@ -115,6 +115,15 @@ emotion_order:
   session_2: [2, 1, 3, 0, 4, 4, 0, 3, 2, 1, 3, 4, 1, 2, 0]
   session_3: [2, 1, 3, 0, 4, 4, 0, 3, 2, 1, 3, 4, 1, 2, 0]
 
+# Optional: per-session clip identifiers from emotion_label_and_stimuli_order.xlsx.
+# If supplied, each atom gets a `stimulus_id` categorical annotation, useful
+# for aligning trials across subjects who watched the same clip.
+# Leave commented out to default to `stimulus_index` only (within-session ordinal).
+# stimulus_order:
+#   session_1: [clip01, clip02, ..., clip15]
+#   session_2: [...]
+#   session_3: [...]
+
 # Trial timestamps (seconds) from trial_start_end_timestamp.txt
 trial_timestamps:
   session_1:
