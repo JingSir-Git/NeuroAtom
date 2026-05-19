@@ -35,8 +35,15 @@ def _check_torch():
         )
 
 
+# Heuristic thresholds for in-memory dataset warnings. Tunable via env or
+# via the ``warn_threshold`` constructor argument. The "rough bytes" estimate
+# treats float32 (signal) as dominant memory cost: n_channels × n_samples × 4.
+_ATOM_DATASET_WARN_SAMPLES = 100_000
+_ATOM_DATASET_WARN_BYTES = 4 * 1024 ** 3  # 4 GiB
+
+
 class AtomDataset(Dataset if HAS_TORCH else object):
-    """PyTorch Dataset wrapping assembled atom samples.
+    """PyTorch Dataset wrapping assembled atom samples (fully in-memory).
 
     Each sample is a dict with:
         - 'signal': np.ndarray (n_channels, n_samples)
@@ -46,16 +53,48 @@ class AtomDataset(Dataset if HAS_TORCH else object):
         - 'atom_id': str
         - 'subject_id': str
         - 'dataset_id': str
+
+    Memory model: holds every sample in RAM. For large pools (≫ 100k atoms
+    or ≫ 4 GiB) you should use :class:`HDF5AtomDataset` instead, which loads
+    signals lazily from HDF5. A warning is emitted at construction time when
+    either threshold is exceeded.
     """
 
     def __init__(
         self,
         samples: List[Dict[str, Any]],
         transforms: Optional[List[Callable]] = None,
+        warn_threshold: Optional[int] = None,
     ):
         _check_torch()
         self._samples = samples
         self._transforms = transforms or []
+        self._maybe_warn_oversize(warn_threshold)
+
+    def _maybe_warn_oversize(self, warn_threshold: Optional[int]) -> None:
+        n = len(self._samples)
+        sample_threshold = warn_threshold or _ATOM_DATASET_WARN_SAMPLES
+        if n >= sample_threshold:
+            logger.warning(
+                "AtomDataset holds %d samples in memory. "
+                "Consider HDF5AtomDataset for lazy on-demand loading.",
+                n,
+            )
+            return
+
+        # Cheaper than touching every sample: estimate from the first signal.
+        if not self._samples:
+            return
+        first_signal = self._samples[0].get("signal")
+        if first_signal is None or not hasattr(first_signal, "nbytes"):
+            return
+        approx_bytes = first_signal.nbytes * n
+        if approx_bytes >= _ATOM_DATASET_WARN_BYTES:
+            logger.warning(
+                "AtomDataset estimated memory footprint: ~%.1f GiB across %d samples. "
+                "Consider HDF5AtomDataset for lazy on-demand loading.",
+                approx_bytes / 1024 ** 3, n,
+            )
 
     def __len__(self):
         return len(self._samples)
@@ -106,6 +145,13 @@ class HDF5AtomDataset(Dataset if HAS_TORCH else object):
     - No file handle sharing across worker processes
     - worker_init_fn initializes handles; cleanup_fn closes them
     - NEVER use this during active imports to the same shards
+
+    Error handling note:
+        ``error_handling='skip'`` causes ``__getitem__`` to return ``None``
+        for failed reads. ``default_collate`` cannot handle ``None``, so
+        you MUST use a None-skipping collate. Use :meth:`safe_collate_fn`
+        (auto-selects based on ``error_handling``) or ``skip_none_collate``
+        directly. Forgetting this will crash the first failed batch.
     """
 
     def __init__(
@@ -123,6 +169,11 @@ class HDF5AtomDataset(Dataset if HAS_TORCH else object):
             error_handling: 'raise', 'skip', or 'substitute'.
         """
         _check_torch()
+        if error_handling not in ("raise", "skip", "substitute"):
+            raise ValueError(
+                f"error_handling must be one of 'raise', 'skip', 'substitute'; "
+                f"got {error_handling!r}."
+            )
         self._atoms = atoms
         self._pool_root = Path(pool_root)
         self._transforms = transforms or []
@@ -130,6 +181,28 @@ class HDF5AtomDataset(Dataset if HAS_TORCH else object):
 
         # Per-worker HDF5 file handles (set by worker_init_fn)
         self._h5_handles: Dict[str, Any] = {}
+
+    @property
+    def error_handling(self) -> str:
+        """Current error handling mode ('raise', 'skip', or 'substitute')."""
+        return self._error_handling
+
+    def safe_collate_fn(self) -> Callable:
+        """Return the right collate_fn for this dataset's error_handling mode.
+
+        - For ``skip`` mode: returns :func:`skip_none_collate` so that
+          ``__getitem__ -> None`` does not crash the batch.
+        - For ``raise`` / ``substitute``: returns the default torch collate.
+
+        Recommended usage::
+
+            ds = HDF5AtomDataset(..., error_handling="skip")
+            loader = DataLoader(ds, collate_fn=ds.safe_collate_fn(), ...)
+        """
+        _check_torch()
+        if self._error_handling == "skip":
+            return skip_none_collate
+        return torch.utils.data.dataloader.default_collate
 
     def __len__(self):
         return len(self._atoms)
@@ -198,34 +271,52 @@ class HDF5AtomDataset(Dataset if HAS_TORCH else object):
 
     def close_handles(self) -> None:
         """Close all HDF5 file handles (call in cleanup or worker exit)."""
-        for h5f in self._h5_handles.values():
+        handles = getattr(self, "_h5_handles", None)
+        if not handles:
+            return
+        for h5f in handles.values():
             try:
                 h5f.close()
             except Exception:
                 pass
-        self._h5_handles.clear()
+        handles.clear()
 
     def __del__(self):
-        self.close_handles()
+        # Guard against partial construction: if __init__ raised before
+        # _h5_handles was set, close_handles must not crash on AttributeError.
+        try:
+            self.close_handles()
+        except Exception:
+            pass
 
 
 def worker_init_fn(worker_id: int) -> None:
     """DataLoader worker_init_fn: ensure each worker has fresh HDF5 handles.
 
-    Usage:
+    Closes both dataset-owned handles (HDF5AtomDataset) and the
+    thread-local read-cache in signal_store. Crucial after fork(): h5py
+    handles inherited from the parent are not safe to use.
+
+    Usage::
+
         loader = DataLoader(
-            dataset,
-            num_workers=4,
-            worker_init_fn=worker_init_fn,
+            dataset, num_workers=4, worker_init_fn=worker_init_fn,
         )
     """
+    # Reset the storage-layer read cache (used by static_read in assembly /
+    # in-memory AtomDataset paths that touch the pool).
+    try:
+        from neuroatom.storage.signal_store import close_read_handles
+        close_read_handles()
+    except Exception:
+        pass
+
     worker_info = torch.utils.data.get_worker_info()
     if worker_info is not None:
         dataset = worker_info.dataset
         if isinstance(dataset, HDF5AtomDataset):
             # Close any inherited handles (from fork)
             dataset.close_handles()
-            # Handles will be re-opened lazily per worker
             logger.debug("Worker %d: HDF5 handles reset.", worker_id)
 
 

@@ -490,7 +490,7 @@ def load_multi_dataset(
         pool_dir = tempfile.mkdtemp(prefix="neuroatom_mae_multi_")
     pool_path = Path(pool_dir)
 
-    if (pool_path / "pool.json").exists():
+    if Pool.exists(pool_path):
         pool = Pool.open(pool_path)
         logger.info("Opened existing pool at %s", pool_path)
     else:

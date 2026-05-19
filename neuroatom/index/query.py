@@ -79,8 +79,6 @@ class QueryBuilder:
 
         conditions: List[str] = []
         params: List[Any] = []
-        joins: List[str] = []
-        annotation_subquery_idx = 0
 
         # ---- dataset_id ----
         if "dataset_id" in query:

@@ -79,22 +79,19 @@ class DataSplitter:
         rng = np.random.RandomState(seed)
 
         if test_subjects and val_subjects:
-            # Explicit assignment
-            train_subs = [s for s in subjects if s not in test_subjects and s not in val_subjects]
+            # Explicit assignment — train is everything not in test/val (handled below).
+            pass
         elif test_subjects:
             remaining = [s for s in subjects if s not in test_subjects]
             rng.shuffle(remaining)
             n_val = max(1, int(len(remaining) * val_ratio / (1 - test_ratio)))
-            val_subs = remaining[:n_val]
-            train_subs = remaining[n_val:]
-            val_subjects = val_subs
+            val_subjects = remaining[:n_val]
         else:
             rng.shuffle(subjects)
             n_test = max(1, int(len(subjects) * test_ratio)) if test_ratio > 0 else 0
             n_val = max(1, int(len(subjects) * val_ratio)) if val_ratio > 0 else 0
             test_subjects = subjects[:n_test]
             val_subjects = subjects[n_test:n_test + n_val]
-            train_subs = subjects[n_test + n_val:]
 
         test_set = set(test_subjects)
         val_set = set(val_subjects)

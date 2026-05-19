@@ -40,7 +40,7 @@ mne = _require("mne", "the BIDS importer")
 
 from neuroatom.core.channel import ChannelInfo
 from neuroatom.core.dataset_meta import DatasetMeta
-from neuroatom.core.enums import ChannelType
+from neuroatom.core.enums import ChannelStatus, ChannelType
 from neuroatom.core.subject import SubjectMeta
 from neuroatom.importers.base import BaseImporter, ImportResult, TaskConfig
 from neuroatom.importers.registry import register_importer
@@ -167,7 +167,13 @@ def _read_channels_tsv(
         unit = row.get("units", task_config.signal_unit or "V")
 
         # Status
-        status = row.get("status", "good").lower()
+        status_str = row.get("status", "good").lower()
+        if status_str == "bad":
+            ch_status = ChannelStatus.BAD
+        elif status_str == "good":
+            ch_status = ChannelStatus.GOOD
+        else:
+            ch_status = ChannelStatus.UNKNOWN
 
         ch_infos.append(ChannelInfo(
             channel_id=f"ch_{idx:03d}",
@@ -177,6 +183,7 @@ def _read_channels_tsv(
             type=ch_type,
             unit=unit,
             sampling_rate=sfreq,
+            status=ch_status,
         ))
 
     return ch_infos

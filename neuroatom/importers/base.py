@@ -118,6 +118,55 @@ class TaskConfig:
     def data(self) -> Dict[str, Any]:
         return self._data
 
+    # ------------------------------------------------------------------
+    # quickload metadata
+    #
+    # Optional ``quickload:`` section in the YAML controls how the
+    # high-level :func:`neuroatom.quickload` API drives this importer.
+    # Lives in YAML rather than hardcoded in quick.py so adding a new
+    # dataset = adding a new YAML, no Python edits required.
+    #
+    # Schema::
+    #
+    #     quickload:
+    #       label_field: mi_class          # primary annotation for labels
+    #       aliases: [openbmi_motor]       # alternate names callers may pass
+    #       data_path_kwarg: mat_path      # importer kwarg receiving data_path
+    #       entry_method: import_subject   # importer method to invoke
+    #       subject_pattern: '^(A\d{2})'   # regex on filename stem → subject_id
+    # ------------------------------------------------------------------
+
+    @property
+    def quickload_meta(self) -> Dict[str, Any]:
+        """Return the ``quickload:`` section (or an empty dict)."""
+        return self._data.get("quickload", {}) or {}
+
+    @property
+    def label_field(self) -> Optional[str]:
+        """Primary annotation name used as the default training label."""
+        return self.quickload_meta.get("label_field")
+
+    @property
+    def quickload_aliases(self) -> List[str]:
+        """Alternate dataset names that should resolve to this config."""
+        aliases = self.quickload_meta.get("aliases") or []
+        return list(aliases)
+
+    @property
+    def quickload_data_path_kwarg(self) -> Optional[str]:
+        """Importer kwarg that receives ``data_path`` from quickload."""
+        return self.quickload_meta.get("data_path_kwarg")
+
+    @property
+    def quickload_entry_method(self) -> str:
+        """Method on the importer to invoke (default: ``import_subject``)."""
+        return self.quickload_meta.get("entry_method", "import_subject")
+
+    @property
+    def quickload_subject_pattern(self) -> Optional[str]:
+        """Regex applied to the data file stem to infer subject_id."""
+        return self.quickload_meta.get("subject_pattern")
+
 
 class ImportResult:
     """Result of importing a single run."""
@@ -217,6 +266,13 @@ class BaseImporter(ABC):
         """Import a single run: load → extract metadata → atomize → store.
 
         This is the main entry point for importing data.
+
+        Concurrency: the dataset-level FileLock is acquired around the
+        write phase (shard + JSONL + RunMeta). Two processes importing
+        the same dataset serialize on this lock; two processes importing
+        *different* datasets run in parallel. FileLock is reentrant within
+        the same process, so per-subject importers calling import_run
+        repeatedly do not deadlock.
         """
         from neuroatom.utils.validation import validate_signal
 
@@ -260,56 +316,59 @@ class BaseImporter(ABC):
         )
         run_meta.n_trials = len(atoms)
 
-        # 6. Store: signals to HDF5 shards, metadata to JSONL
+        # 6. Store: signals to HDF5 shards, metadata to JSONL.
+        # Acquire the dataset-level lock so concurrent writers to the SAME
+        # dataset are serialized. Different datasets remain parallelizable.
         warnings = []
         max_shard_mb = self._pool.config.get("storage", {}).get("max_shard_size_mb", 200.0)
         compression = self._pool.config.get("storage", {}).get("compression", "gzip")
 
         from neuroatom.storage import paths as P
 
-        with ShardManager(
-            pool_root=self._pool.root,
-            dataset_id=dataset_id,
-            subject_id=subject_id,
-            session_id=session_id,
-            run_id=run_id,
-            max_shard_size_mb=max_shard_mb,
-            compression=compression,
-        ) as shard_mgr:
-            jsonl_path = P.atoms_jsonl_path(
-                self._pool.root, dataset_id, subject_id, session_id, run_id
-            )
-            with AtomJSONLWriter(jsonl_path) as jsonl_writer:
-                for atom in atoms:
-                    # Extract signal data from raw
-                    signal = self._extract_atom_signal(raw, atom, channel_infos)
+        with self._pool.dataset_lock(dataset_id):
+            with ShardManager(
+                pool_root=self._pool.root,
+                dataset_id=dataset_id,
+                subject_id=subject_id,
+                session_id=session_id,
+                run_id=run_id,
+                max_shard_size_mb=max_shard_mb,
+                compression=compression,
+            ) as shard_mgr:
+                jsonl_path = P.atoms_jsonl_path(
+                    self._pool.root, dataset_id, subject_id, session_id, run_id
+                )
+                with AtomJSONLWriter(jsonl_path) as jsonl_writer:
+                    for atom in atoms:
+                        # Extract signal data from raw
+                        signal = self._extract_atom_signal(raw, atom, channel_infos)
 
-                    # Validate signal
-                    validation_warnings = validate_signal(
-                        signal=signal,
-                        atom_id=atom.atom_id,
-                        config=self._pool.config.get("import", {}),
-                    )
-                    warnings.extend(validation_warnings)
+                        # Validate signal
+                        validation_warnings = validate_signal(
+                            signal=signal,
+                            atom_id=atom.atom_id,
+                            config=self._pool.config.get("import", {}),
+                        )
+                        warnings.extend(validation_warnings)
 
-                    # Extract annotation arrays
-                    ann_arrays = self._extract_annotation_arrays(raw, atom)
+                        # Extract annotation arrays
+                        ann_arrays = self._extract_annotation_arrays(raw, atom)
 
-                    # Write to shard
-                    signal_ref = shard_mgr.write_atom_signal(
-                        atom.atom_id, signal, ann_arrays
-                    )
+                        # Write to shard
+                        signal_ref = shard_mgr.write_atom_signal(
+                            atom.atom_id, signal, ann_arrays
+                        )
 
-                    # Update atom's signal_ref with actual storage location
-                    atom.signal_ref = signal_ref
+                        # Update atom's signal_ref with actual storage location
+                        atom.signal_ref = signal_ref
 
-                    # Write metadata
-                    jsonl_writer.write_atom(atom)
+                        # Write metadata
+                        jsonl_writer.write_atom(atom)
 
-                jsonl_writer.flush()
+                    jsonl_writer.flush()
 
-        # 7. Register metadata in pool
-        self._pool.register_run(run_meta)
+            # 7. Register metadata in pool (also under the lock)
+            self._pool.register_run(run_meta)
 
         logger.info(
             "Imported run %s/%s/%s/%s: %d atoms",

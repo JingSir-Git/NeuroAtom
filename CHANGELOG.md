@@ -97,7 +97,7 @@ Initial public release.
 - `pyproject.toml` with `setuptools.build_meta`, optional dependency extras
   (`mne`, `bids`, `eeglab`, `torch`, `moabb`, `all`, `dev`)
 - All data paths resolved from environment variables (no hardcoded paths)
-- 225 tests (unit + E2E integration), 1 skipped, 0 failures
+- ~300 tests (unit + E2E integration), 0 failures
 - Examples: `bci_iv_2a_full_pipeline.py`, `train_simple_cnn.py`,
   `federated_cross_dataset.py`, `yaml_pipeline.py`
 - Benchmark: `benchmark_scale.py` — import/index/query/assembly/DataLoader throughput

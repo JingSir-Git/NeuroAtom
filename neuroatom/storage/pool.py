@@ -76,7 +76,7 @@ class Pool:
         if config_path.exists():
             logger.warning(
                 "Pool already exists at %s (pool.yaml found). "
-                "Config will be overwritten. Use Pool(pool_root) to open an existing pool.",
+                "Config will be overwritten. Use Pool.open(pool_root) to open an existing pool.",
                 pool_root,
             )
 
@@ -98,6 +98,33 @@ class Pool:
 
         logger.info("Created new pool at %s", pool_root)
         return cls(pool_root)
+
+    @classmethod
+    def open(cls, pool_root: Path) -> "Pool":
+        """Open an existing pool. Symmetric counterpart to ``Pool.create``.
+
+        Equivalent to ``Pool(pool_root)`` but reads more naturally at call sites
+        and matches the create/open file-API convention.
+        """
+        return cls(pool_root)
+
+    @classmethod
+    def open_or_create(
+        cls, pool_root: Path, config_overrides: Optional[Dict] = None
+    ) -> "Pool":
+        """Open the pool if pool.yaml exists, otherwise create it.
+
+        Replaces the error-prone ``if pool.json exists ... else create`` idiom
+        scattered through callers.
+        """
+        if P.pool_config_path(Path(pool_root)).exists():
+            return cls.open(pool_root)
+        return cls.create(pool_root, config_overrides=config_overrides)
+
+    @classmethod
+    def exists(cls, pool_root: Path) -> bool:
+        """Return True if a pool config (pool.yaml) is present at ``pool_root``."""
+        return P.pool_config_path(Path(pool_root)).exists()
 
     # ------------------------------------------------------------------
     # Dataset CRUD

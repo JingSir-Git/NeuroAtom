@@ -81,10 +81,7 @@ def quickload(
         pool_dir = Path(pool_dir)
 
     from neuroatom.storage.pool import Pool
-    if (pool_dir / "pool.json").exists():
-        pool = Pool.open(pool_dir)
-    else:
-        pool = Pool.create(pool_dir)
+    pool = Pool.open_or_create(pool_dir)
 
     # ── 2. Load task config ──────────────────────────────────────────────
     from neuroatom.importers.base import TaskConfig
@@ -95,9 +92,9 @@ def quickload(
     from neuroatom.importers.registry import get_importer
 
     importer = get_importer(dataset, pool, config)
-    subject = subject or _infer_subject(data_path, dataset)
+    subject = subject or _infer_subject(data_path, dataset, config=config)
 
-    _do_import(importer, dataset, data_path, subject, extra_import_kwargs)
+    _do_import(importer, dataset, data_path, subject, extra_import_kwargs, config=config)
 
     # ── 4. Index ─────────────────────────────────────────────────────────
     from neuroatom.index.indexer import Indexer
@@ -110,7 +107,7 @@ def quickload(
     logger.info("Indexed %d atoms.", n)
 
     # ── 5. Assemble ──────────────────────────────────────────────────────
-    label_field = label_field or _infer_label_field(config, dataset)
+    label_field = label_field or _infer_label_field(config, dataset=dataset)
 
     from neuroatom.core.recipe import AssemblyRecipe, LabelSpec
     from neuroatom.core.enums import (
@@ -196,11 +193,17 @@ def quickload(
 
 # ══════════════════════════════════════════════════════════════════════════
 # Internal helpers
+#
+# Source-of-truth precedence for per-dataset metadata:
+#   1. TaskConfig.quickload_meta from the YAML config (preferred)
+#   2. Fallback hardcoded defaults below (legacy compatibility)
+#
+# To add a new dataset: drop a YAML with a ``quickload:`` section into
+# ``importers/task_configs/``. No edits to this file required.
 # ══════════════════════════════════════════════════════════════════════════
 
-# Map dataset names to their built-in config names
-# (most are identical; exceptions listed here)
-_CONFIG_ALIASES: Dict[str, str] = {
+# Fallback aliases for datasets that don't yet ship a YAML ``quickload.aliases``.
+_FALLBACK_CONFIG_ALIASES: Dict[str, str] = {
     "zuco2": "zuco2_tsr",
     "zuco2_tsr": "zuco2_tsr",
     "kul_aad": "kul_aad",
@@ -209,28 +212,9 @@ _CONFIG_ALIASES: Dict[str, str] = {
     "chinese_eeg2": "chinese_eeg2_listening",
 }
 
-
-def _resolve_config_name(dataset: str) -> str:
-    return _CONFIG_ALIASES.get(dataset, dataset)
-
-
-def _infer_subject(data_path: Path, dataset: str) -> str:
-    """Best-effort subject ID inference from the file path."""
-    stem = data_path.stem
-    if dataset == "bci_comp_iv_2a":
-        # A01T.mat → A01
-        return stem[:3] if len(stem) >= 3 else stem
-    if dataset in ("kul_aad", "dtu_aad", "aad_mat"):
-        # S1.mat → S1
-        return stem
-    if dataset == "physionet_mi":
-        # S001 directory → S001
-        return data_path.name
-    # Fallback: use the filename stem
-    return stem
-
-
-_KNOWN_LABEL_FIELDS: Dict[str, str] = {
+# Fallback label fields. Datasets with a ``quickload.label_field`` in their
+# YAML override this.
+_FALLBACK_LABEL_FIELDS: Dict[str, str] = {
     "bci_comp_iv_2a": "mi_class",
     "physionet_mi": "mi_class",
     "seed_v": "emotion",
@@ -252,74 +236,141 @@ _KNOWN_LABEL_FIELDS: Dict[str, str] = {
     "inner_speech": "inner_speech_class",
 }
 
+# Fallback (data_path_kwarg, entry_method) per dataset, for YAMLs that
+# don't yet declare ``quickload``.
+_FALLBACK_IMPORT_SIGNATURES: Dict[str, Tuple[str, str]] = {
+    "bci_comp_iv_2a": ("mat_path", "import_subject"),
+    "physionet_mi": ("subject_dir", "import_subject"),
+    "seed_v": ("subject_dir", "import_subject"),
+    "zuco2": ("subject_dir", "import_subject"),
+    "zuco2_tsr": ("subject_dir", "import_subject"),
+    "ccep_bids_npy": ("subject_dir", "import_subject"),
+    "openbmi_mi": ("mat_path", "import_subject"),
+    "openbmi_erp": ("mat_path", "import_subject"),
+    "openbmi_ssvep": ("mat_path", "import_subject"),
+    "aad_mat": ("mat_path", "import_subject"),
+    "kul_aad": ("mat_path", "import_subject"),
+    "dtu_aad": ("mat_path", "import_subject"),
+    # ChineseEEG-2 takes a BIDS root and a subject list; handled specially.
+    "chinese_eeg2": ("bids_root", "import_dataset"),
+    "chinese_eeg2_listening": ("bids_root", "import_dataset"),
+    "chinese_eeg2_reading": ("bids_root", "import_dataset"),
+}
+
+
+def _resolve_config_name(dataset: str) -> str:
+    """Resolve a user-facing dataset name to the actual config file basename.
+
+    Reads ``quickload.aliases`` from each built-in YAML config to build a
+    forward map; falls back to ``_FALLBACK_CONFIG_ALIASES`` for unconfigured
+    datasets.
+    """
+    # Try built-in YAMLs' aliases first.
+    try:
+        import importlib.resources as _res
+
+        pkg = "neuroatom.importers.task_configs"
+        for ref in _res.files(pkg).iterdir():
+            if not ref.name.endswith(".yaml") or ref.name.startswith("_"):
+                continue
+            config_name = ref.name.removesuffix(".yaml")
+            if config_name == dataset:
+                return config_name  # exact match
+            try:
+                from neuroatom.importers.base import TaskConfig
+                cfg = TaskConfig.builtin(config_name)
+                if dataset in cfg.quickload_aliases:
+                    return config_name
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return _FALLBACK_CONFIG_ALIASES.get(dataset, dataset)
+
+
+def _infer_subject(data_path: Path, dataset: str, config=None) -> str:
+    """Best-effort subject ID inference from the file path.
+
+    Precedence:
+        1. ``quickload.subject_pattern`` regex from TaskConfig (if matches).
+        2. Per-dataset hardcoded heuristic below.
+    """
+    stem = data_path.stem
+
+    # YAML-declared regex wins.
+    if config is not None:
+        pat = config.quickload_subject_pattern
+        if pat:
+            import re
+            m = re.search(pat, stem)
+            if m:
+                return m.group(1) if m.groups() else m.group(0)
+
+    # Fallback heuristics.
+    if dataset == "bci_comp_iv_2a":
+        # A01T.mat → A01
+        return stem[:3] if len(stem) >= 3 else stem
+    if dataset in ("kul_aad", "dtu_aad", "aad_mat"):
+        # S1.mat → S1
+        return stem
+    if dataset == "physionet_mi":
+        # S001 directory → S001
+        return data_path.name
+    return stem
+
 
 def _infer_label_field(config, dataset: str = "") -> Optional[str]:
-    """Infer the primary label annotation name from the dataset or config."""
-    # 1. Check known lookup table
-    if dataset in _KNOWN_LABEL_FIELDS:
-        return _KNOWN_LABEL_FIELDS[dataset]
-    # 2. Explicit field in config
-    mapping = config.data
-    for key in ("label_field", "annotation_name"):
-        if key in mapping:
-            return mapping[key]
-    em = config.event_mapping
-    if isinstance(em, dict):
-        if "label_field" in em:
+    """Infer the primary label annotation name.
+
+    Precedence:
+        1. ``quickload.label_field`` in TaskConfig (YAML-declared).
+        2. Top-level ``label_field`` / ``annotation_name`` in config data.
+        3. Fallback hardcoded ``_FALLBACK_LABEL_FIELDS`` lookup.
+        4. ``event_mapping.label_field`` if dict-shaped.
+    """
+    # 1. quickload.label_field (preferred)
+    if config is not None and config.label_field:
+        return config.label_field
+
+    # 2. top-level keys
+    if config is not None:
+        mapping = config.data
+        for key in ("label_field", "annotation_name"):
+            if key in mapping:
+                return mapping[key]
+
+    # 3. legacy hardcoded table
+    if dataset in _FALLBACK_LABEL_FIELDS:
+        return _FALLBACK_LABEL_FIELDS[dataset]
+
+    # 4. nested event_mapping fallback
+    if config is not None:
+        em = config.event_mapping
+        if isinstance(em, dict) and "label_field" in em:
             return em["label_field"]
     return None
 
 
-def _do_import(importer, dataset: str, data_path: Path, subject: str, kwargs: dict):
-    """Dispatch to the correct importer's entry method."""
+def _do_import(importer, dataset: str, data_path: Path, subject: str, kwargs: dict, config=None):
+    """Dispatch to the correct importer's entry method.
 
-    # ── BCI Competition IV 2a ────────────────────────────────────────────
-    if dataset == "bci_comp_iv_2a":
-        importer.import_subject(
-            mat_path=data_path,
-            subject_id=subject,
-            **kwargs,
-        )
-        return
+    Reads ``quickload.data_path_kwarg`` and ``quickload.entry_method`` from
+    TaskConfig (YAML-declared) when available; falls back to the legacy
+    hardcoded signatures for datasets without ``quickload`` metadata.
+    """
+    # ── 1. YAML-declared signature (preferred) ────────────────────────────
+    data_kwarg = config.quickload_data_path_kwarg if config else None
+    entry_method = config.quickload_entry_method if config else "import_subject"
 
-    # ── PhysioNet MI ─────────────────────────────────────────────────────
-    if dataset == "physionet_mi":
-        importer.import_subject(
-            subject_dir=data_path,
-            subject_id=subject,
-            **kwargs,
-        )
-        return
+    # ── 2. Fallback to hardcoded signatures ───────────────────────────────
+    if data_kwarg is None:
+        sig = _FALLBACK_IMPORT_SIGNATURES.get(dataset)
+        if sig:
+            data_kwarg, entry_method = sig
 
-    # ── SEED-V ───────────────────────────────────────────────────────────
-    if dataset == "seed_v":
-        importer.import_subject(
-            subject_dir=data_path,
-            subject_id=subject,
-            **kwargs,
-        )
-        return
-
-    # ── Zuco 2.0 ─────────────────────────────────────────────────────────
-    if dataset in ("zuco2", "zuco2_tsr"):
-        importer.import_subject(
-            subject_dir=data_path,
-            subject_id=subject,
-            **kwargs,
-        )
-        return
-
-    # ── CCEP-COREG ───────────────────────────────────────────────────────
-    if dataset == "ccep_bids_npy":
-        importer.import_subject(
-            subject_dir=data_path,
-            subject_id=subject,
-            **kwargs,
-        )
-        return
-
-    # ── ChineseEEG-2 ────────────────────────────────────────────────────
-    if dataset in ("chinese_eeg2", "chinese_eeg2_listening", "chinese_eeg2_reading"):
+    # ── 3. ChineseEEG-2 special case (multi-subject BIDS) ─────────────────
+    if dataset.startswith("chinese_eeg2") and entry_method == "import_dataset":
         importer.import_dataset(
             bids_root=data_path,
             subjects=[subject] if subject != data_path.stem else None,
@@ -327,25 +378,17 @@ def _do_import(importer, dataset: str, data_path: Path, subject: str, kwargs: di
         )
         return
 
-    # ── OpenBMI (MI / ERP / SSVEP) ─────────────────────────────────────
-    if dataset in ("openbmi_mi", "openbmi_erp", "openbmi_ssvep"):
-        importer.import_subject(
-            mat_path=data_path,
-            subject_id=subject,
-            **kwargs,
-        )
+    # ── 4. Standard single-subject path ───────────────────────────────────
+    if data_kwarg:
+        method = getattr(importer, entry_method, None)
+        if method is None:
+            raise NotImplementedError(
+                f"Importer {type(importer).__name__} has no method '{entry_method}'."
+            )
+        method(**{data_kwarg: data_path}, subject_id=subject, **kwargs)
         return
 
-    # ── AAD (KUL / DTU) ─────────────────────────────────────────────────
-    if dataset in ("aad_mat", "kul_aad", "dtu_aad"):
-        importer.import_subject(
-            mat_path=data_path,
-            subject_id=subject,
-            **kwargs,
-        )
-        return
-
-    # ── Fallback: try common signatures ──────────────────────────────────
+    # ── 5. Last-resort heuristics ─────────────────────────────────────────
     if hasattr(importer, "import_subject"):
         importer.import_subject(data_path, subject_id=subject, **kwargs)
     elif hasattr(importer, "import_dataset"):
@@ -353,5 +396,5 @@ def _do_import(importer, dataset: str, data_path: Path, subject: str, kwargs: di
     else:
         raise NotImplementedError(
             f"Don't know how to call importer for dataset '{dataset}'. "
-            "Pass data manually or use the low-level API."
+            "Add a `quickload:` section to its YAML config or use the low-level API."
         )

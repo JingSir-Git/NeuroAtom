@@ -119,7 +119,6 @@ def _build_channel_infos(
 
         # Look up electrode coordinates (case-insensitive)
         location = None
-        lookup_key = clean_name.capitalize() if clean_name[0].isupper() else clean_name
         # Try exact match first, then capitalized variants
         for try_name in [clean_name, clean_name.capitalize(),
                          clean_name.upper(), std_name or ""]:

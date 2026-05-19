@@ -28,6 +28,12 @@ dataset_name: "PhysioNet EEG Motor Movement/Imagery"
 task_type: motor_imagery
 format: edf
 
+# quickload metadata — see TaskConfig.quickload_meta in importers/base.py
+quickload:
+  label_field: mi_class
+  data_path_kwarg: subject_dir
+  entry_method: import_subject
+
 sampling_rate: 160
 n_channels: 64
 signal_unit: V

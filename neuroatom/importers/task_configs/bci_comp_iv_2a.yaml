@@ -23,6 +23,14 @@ dataset_id: "bci_comp_iv_2a"
 dataset_name: "BCI Competition IV Dataset 2a"
 task_type: "motor_imagery"
 
+# quickload metadata — controls how neuroatom.quickload() drives this importer.
+# See neuroatom/importers/base.py:TaskConfig.quickload_meta for full schema.
+quickload:
+  label_field: mi_class
+  data_path_kwarg: mat_path
+  entry_method: import_subject
+  subject_pattern: '^(A\d{2})'  # A01T.mat → A01
+
 trial_definition:
   mode: "trial"
   # GDF event codes for class cues

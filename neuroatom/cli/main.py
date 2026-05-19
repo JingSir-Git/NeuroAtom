@@ -140,16 +140,16 @@ def stats(pool_path: str, dataset: Optional[str], json_out: Optional[str]):
 
     # Display
     click.echo(f"Total atoms: {stats_data['total_atoms']}")
-    click.echo(f"\nPer dataset:")
+    click.echo("\nPer dataset:")
     for ds, count in stats_data["per_dataset"].items():
         click.echo(f"  [{ds}] {count} atoms")
-    click.echo(f"\nPer atom type:")
+    click.echo("\nPer atom type:")
     for atype, count in stats_data["per_type"].items():
         click.echo(f"  {atype}: {count}")
-    click.echo(f"\nLabel distribution:")
+    click.echo("\nLabel distribution:")
     for label, count in sorted(stats_data["label_distribution"].items()):
         click.echo(f"  {label}: {count}")
-    click.echo(f"\nSampling rates:")
+    click.echo("\nSampling rates:")
     for srate, count in srate_hist.items():
         click.echo(f"  {srate} Hz: {count} atoms")
     click.echo(f"\nDuration: min={dur_row['dmin']:.2f}s, max={dur_row['dmax']:.2f}s, avg={dur_row['davg']:.3f}s")
@@ -255,7 +255,7 @@ def assemble(pool_path: str, recipe_yaml: str, cache_dir: Optional[str]):
         cache_dir=Path(cache_dir) if cache_dir else None,
     )
 
-    click.echo(f"Assembly complete:")
+    click.echo("Assembly complete:")
     click.echo(f"  Train: {len(result.train_samples)}")
     click.echo(f"  Val:   {len(result.val_samples)}")
     click.echo(f"  Test:  {len(result.test_samples)}")

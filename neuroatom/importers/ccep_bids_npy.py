@@ -122,11 +122,9 @@ def _read_electrodes(
     # Determine coordinate system and units from coordsystem JSON
     coord_system = "unknown"
     coord_units = "m"  # BIDS default
-    coord_system_info: Dict[str, Any] = {}
 
     if coordsystem_json and coordsystem_json.exists():
         cs = _read_json(coordsystem_json)
-        coord_system_info = cs
         # BIDS uses EEGCoordinateSystem or iEEGCoordinateSystem
         coord_system = (
             cs.get("EEGCoordinateSystem")

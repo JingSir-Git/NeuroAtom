@@ -78,3 +78,18 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["examples", "docs"]
+
+[tool.ruff.lint]
+# Conservative ruleset — pyflakes (F) + pycodestyle errors (E) only.
+# Expand to E501, B, UP, I later once the codebase is clean.
+select = ["F", "E9"]
+# F401/F403: unused imports/star — common in __init__ re-exports
+ignore = ["F401", "F403"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F841"]  # unused assignments common in tests

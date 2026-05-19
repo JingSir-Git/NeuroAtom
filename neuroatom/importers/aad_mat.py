@@ -410,7 +410,6 @@ class AADImporter(BaseImporter):
         from neuroatom.storage.signal_store import ShardManager
         from neuroatom.storage.metadata_store import AtomJSONLWriter
         from neuroatom.storage import paths as P
-        from neuroatom.core.annotation import CategoricalAnnotation, TextAnnotation
         from neuroatom.core.atom import Atom, TemporalInfo
         from neuroatom.core.enums import AtomType
         from neuroatom.core.provenance import ProcessingHistory, ProcessingStep
