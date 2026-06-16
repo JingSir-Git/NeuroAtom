@@ -1,0 +1,43 @@
+# Task Configuration: EEG-AAD-255 high-density auditory attention decoding
+# 256-channel Neuroscan Curry recordings (253 scalp EEG + XtraL/XtraR + Trigger).
+#
+# 32 subjects, 4 recordings each (blocks 1-2 x attend Left/Right). The attended
+# side is encoded in the filename (S0_AAD_1L / S0_AAD_1R), giving unambiguous
+# per-trial labels. Each recording (~436 s @ 1000 Hz) is continuous single-side
+# attention → one TRIAL atom with a static attended_direction label.
+#
+# MNE returns SI volts; the importer converts to the pool storage unit (µV).
+# Electrode layout available at misc/misc/eeg255ch_locs.csv (not yet imported).
+
+dataset_id: "eeg_aad_255"
+dataset_name: "EEG-AAD-255 High-Density Auditory Attention Decoding"
+task_type: "auditory_attention_decoding"
+original_format: "curry"
+
+# Raw (unreferenced/unfiltered) high-density EEG; stored in µV after V→µV.
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+
+event_mapping:
+  L: "attend_left"
+  R: "attend_right"
+
+# Trigger is the stimulus marker channel, not neural — excluded from the signal.
+channel_type_overrides:
+  Trigger: "stim"
+
+exclude_channels:
+  - Trigger
+
+custom:
+  n_subjects: 32
+  n_recordings_per_subject: 4
+  n_channels: 255
+  external_channels: ["XtraL", "XtraR"]
+  sampling_rate: 1000
+  paradigm: "cocktail_party_high_density"
+  attention: "static per recording (attend left/right)"
+  electrode_layout: "misc/misc/eeg255ch_locs.csv"
+  citation: "EEG-AAD-255 (256-channel AAD)"
