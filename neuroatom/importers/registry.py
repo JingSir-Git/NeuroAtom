@@ -50,6 +50,7 @@ def _ensure_all_registered() -> None:
         "neuroatom.importers.avgc_aad",
         "neuroatom.importers.ear_saad",
         "neuroatom.importers.eeg_aad_255",
+        "neuroatom.importers.base_aad_ustc",
     ]
     for mod in _modules:
         try:
@@ -70,6 +71,7 @@ _FORMAT_ALIASES: Dict[str, str] = {
     "avgc_aad": "avgc_aad",
     "ear_saad": "ear_saad",
     "eeg_aad_255": "eeg_aad_255",
+    "base_aad_ustc": "base_aad_ustc",
 }
 
 

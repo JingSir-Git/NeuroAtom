@@ -1,0 +1,48 @@
+# Task Configuration: BASE-AAD-USTC dichotic auditory attention decoding
+# USTC dataset, 18 normal-hearing subjects. Dichotic listening (one speaker per
+# ear); 20 trials of 120 s, attention switched between successive trials.
+#
+# Neuroscan SynAmps (Quik-Cap 64) @ 1000 Hz, Curry 8 .cdt. MNE's Curry reader
+# crashes on these files (header NumSamples disagrees with file size), so the
+# importer reads the float32 payload directly (already in µV) using channel
+# labels from the .dpa sidecar, and segments trials from the Trigger channel.
+# Per-trial attended ear (L/R) comes from group1.xlsx.
+
+dataset_id: "base_aad_ustc"
+dataset_name: "BASE-AAD-USTC Dichotic Auditory Attention Decoding"
+task_type: "auditory_attention_decoding"
+original_format: "curry"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+  # Trials delimited by Trigger codes (baseline + trial_number).
+
+event_mapping:
+  L: "attend_left"
+  R: "attend_right"
+
+# Trigger marks trial onsets; excluded from the stored neural signal.
+channel_type_overrides:
+  Trigger: "stim"
+
+exclude_channels:
+  - Trigger
+
+custom:
+  n_subjects: 18
+  n_trials_per_subject: 20
+  trial_duration_seconds: 120
+  sampling_rate: 1000
+  cap: "Quik-Cap 64"
+  paradigm: "dichotic_cocktail_party"
+  non_eeg_channels: ["HEO", "VEO", "EKG", "EMG"]
+  poor_answer_trials:
+    "13": [16]
+    "14": [13]
+    "16": [4]
+    "17": [18]
+  stimuli: "Xinwen Lianbo news, 4 native Chinese speakers, 44.1 kHz"
+  institution: "USTC"
+  citation: "BASE-AAD-USTC"
