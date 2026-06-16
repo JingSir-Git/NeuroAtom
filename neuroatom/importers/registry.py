@@ -100,13 +100,26 @@ def get_importer(
     return cls(pool=pool, task_config=task_config)
 
 
+# Generic / catch-all importers. These match broadly (any .mat, any MNE-readable
+# file, any BIDS tree), so they are tried only AFTER specialized importers —
+# otherwise a specialized .mat dataset (e.g. ear_saad) could be claimed by the
+# generic ``mat`` importer purely because of registration order.
+_GENERIC_FORMATS = frozenset({"bids", "eeglab", "generic", "mat", "mne_generic"})
+
+
 def detect_format(path: Path) -> Optional[str]:
     """Auto-detect the format of a data file/directory.
 
-    Iterates through registered importers and returns the first match.
+    Tries specialized importers first and generic/catch-all importers last,
+    returning the first match. Precedence does not depend on registration order.
     """
     _ensure_all_registered()
-    for format_name, importer_class in _REGISTRY.items():
+    items = list(_REGISTRY.items())
+    ordered = (
+        [(n, c) for n, c in items if n not in _GENERIC_FORMATS]
+        + [(n, c) for n, c in items if n in _GENERIC_FORMATS]
+    )
+    for format_name, importer_class in ordered:
         try:
             if importer_class.detect(path):
                 logger.info("Detected format '%s' for %s", format_name, path)
