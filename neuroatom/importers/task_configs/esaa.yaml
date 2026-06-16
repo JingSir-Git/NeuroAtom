@@ -1,0 +1,47 @@
+# Task Configuration: ESAA spatial auditory attention decoding (SCUT)
+# South China University of Technology. Subjects attend one of two competing
+# speech streams at different spatial directions (anechoic `clean/` and
+# HRTF-spatialised `hrtf/` stimuli). 32 trials/subject, continuous 1000 Hz,
+# 64-ch EEG (10-10) + ECG.
+#
+# Each subject is one continuous .mat with per-channel arrays + a Markers struct.
+# Trials are segmented at the trail{k}S start marker (Markers[3k+2]) with a fixed
+# 55 s window forward — matching the dataset's own preprocess.py.
+#
+# Attention labels follow the SCUT protocol (db/SCUT.py): a fixed 32-trial
+# [direction, speaker] table with a documented reorder + label reversal for
+# subjects > 8 (scut_order), replicated verbatim. direction/speaker are the two
+# binary AAD targets ({0,1}). Poor-answer trials are imported but flagged
+# excluded=true.
+
+dataset_id: "esaa"
+dataset_name: "ESAA Spatial Auditory Attention Decoding (SCUT)"
+task_type: "auditory_attention_decoding"
+original_format: "mat"
+
+# Raw continuous EEG (large DC offsets); stored in µV.
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+  anchor_events: ["trailS"]   # start marker; 55 s forward
+
+event_mapping:
+  "0": "direction_0"
+  "1": "direction_1"
+
+# ECG is non-neural (typed OTHER by the importer); no channels excluded.
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 20
+  n_trials_per_subject: 32
+  trial_duration_seconds: 55
+  sampling_rate: 1000
+  n_eeg_channels: 64
+  paradigm: "spatial_cocktail_party_hrtf"
+  labels: "SCUT protocol (direction + speaker, binary); reorder+reversal for sub>8"
+  stimuli_dirs: ["clean", "hrtf"]
+  institution: "South China University of Technology"
+  citation: "SCUT spatial AAD"
