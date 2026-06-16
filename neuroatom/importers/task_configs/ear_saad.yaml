@@ -1,0 +1,43 @@
+# Task Configuration: Ear-SAAD ear-EEG Spatial AAD
+# Preprocessed audio-visual auditory attention dataset with in-ear electrodes.
+#
+# 15 subjects, 6 trials each, 20 Hz (downsampled for envelope tracking).
+# 61 channels: scalp EEG + M1/M2 mastoids + cER5-10 in-ear (ear-EEG) electrodes.
+# Half the trials add a talking-face video (videoCondition).
+#
+# Static attention per trial (attended_ear / attended_speaker constant).
+# Two speaker speech envelopes + acoustic-edge onset features are stored as
+# ContinuousAnnotation companion arrays (sample-aligned, 20 Hz).
+#
+# NOTE: preprocessing leaves NaN gaps where segments were rejected; these are
+# imported faithfully and surface as validation warnings.
+
+dataset_id: "ear_saad"
+dataset_name: "Ear-SAAD ear-EEG Spatial Auditory Attention Decoding"
+task_type: "auditory_attention_decoding"
+original_format: "mat"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+
+event_mapping:
+  "1": "attend_speaker_1"
+  "2": "attend_speaker_2"
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 15
+  n_trials_per_subject: 6
+  sampling_rate: 20
+  paradigm: "cocktail_party_audiovisual_eareeg"
+  has_eareeg: true
+  eareeg_channels: ["cER5", "cER6", "cER7", "cER8", "cER9", "cER10"]
+  video_conditions: ["no_video", "video"]
+  has_audio_envelopes: true
+  envelopes: ["speaker1", "speaker2"]
+  companion_features: ["acoustic_edges"]
+  note: "preprocessed at 20 Hz; may contain NaN gaps from artifact rejection"
