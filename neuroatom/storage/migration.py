@@ -23,7 +23,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 # Current schema version
-CURRENT_SCHEMA_VERSION = "0.1.0"
+CURRENT_SCHEMA_VERSION = "1.1.0"
 
 # Registry: (from_version, to_version) → migration function
 _MIGRATIONS: Dict[Tuple[str, str], Callable[[Path], None]] = {}

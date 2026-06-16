@@ -1,10 +1,17 @@
-schema_version: "1.0.0"
+schema_version: "1.1.0"
+
 storage:
   signal_backend: "hdf5"
   compression: "gzip"
   compression_level: 4
   max_shard_size_mb: 200.0
   chunk_size: null  # auto-determine
+
+storage_conventions:
+  signal_unit: "uV"           # All signals stored in µV at import time
+  channel_naming: "standard"  # Channel names standardized to 10-20 at import
+  coordinate_system: "MNI152" # Preferred electrode coordinate system
+  enforce_on_import: true     # Enforce conventions during import
 
 metadata:
   atom_format: "jsonl"  # one JSON per line per run

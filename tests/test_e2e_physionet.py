@@ -141,10 +141,10 @@ def test_physionet_import_and_index(pool_dir):
     assert signal.shape[1] == 641  # 4.0s * 160 Hz + 1
     assert signal.dtype == np.float32
 
-    # Signal in V → typical EEG is [-500µV, +500µV] = [-5e-4, 5e-4]
+    # Signal in µV — typical EEG is [-500µV, +500µV]
     max_abs = np.abs(signal).max()
-    assert max_abs > 1e-6, f"Signal too small: {max_abs}"
-    assert max_abs < 0.01, f"Signal too large for V: {max_abs}"
+    assert max_abs > 0.01, f"Signal too small for µV: {max_abs}"
+    assert max_abs < 1e6, f"Signal too large for µV: {max_abs}"
 
     indexer.close()
     print(f"\n✓ PhysioNet MI: {n_atoms} MI epochs + 2 baseline, "

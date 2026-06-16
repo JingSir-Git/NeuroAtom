@@ -177,6 +177,24 @@ class Atom(BaseModel):
         description="Sampling rate of the signal in Hz.",
     )
 
+    # ---- Signal unit ----
+    signal_unit: str = Field(
+        default="uV",
+        description=(
+            "Physical unit of the stored signal (e.g. 'uV', 'V', 'mV'). "
+            "NeuroAtom convention: all signals are stored in µV at import time. "
+            "Consumers can trust this field to know the unit without guessing."
+        ),
+    )
+    original_unit: Optional[str] = Field(
+        default=None,
+        description=(
+            "Original unit of the signal before import-time conversion. "
+            "None if the original unit is the same as signal_unit. "
+            "Enables full provenance: original_unit → signal_unit conversion."
+        ),
+    )
+
     # ---- Annotations (discriminated union) ----
     annotations: List[AnnotationUnion] = Field(
         default_factory=list,

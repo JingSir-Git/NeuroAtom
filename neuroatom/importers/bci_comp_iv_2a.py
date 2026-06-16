@@ -53,6 +53,7 @@ from neuroatom.importers.registry import register_importer
 from neuroatom.storage.pool import Pool
 from neuroatom.utils.channel_names import standardize_channel_name
 from neuroatom.utils.hashing import compute_atom_id
+from neuroatom.utils.unit_convert import convert_to_storage_unit
 from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
@@ -453,17 +454,26 @@ class BCICompIV2aImporter(BaseImporter):
                                 },
                             )
 
+                            # Convert to pool storage unit (µV → µV, identity)
+                            epoch_conv, storage_unit, orig_unit = convert_to_storage_unit(
+                                epoch.astype(np.float32), source_unit="uV",
+                                pool_config=self.pool.config,
+                            )
+                            atom.signal_unit = storage_unit
+                            atom.original_unit = orig_unit
+
                             # Validate signal
                             warnings = validate_signal(
-                                signal=epoch.astype(np.float32),
+                                signal=epoch_conv,
                                 atom_id=atom_id,
                                 config=self.pool.config.get("import", {}),
+                                signal_unit=storage_unit,
                             )
                             all_warnings.extend(warnings)
 
                             # Write signal
                             signal_ref = shard_mgr.write_atom_signal(
-                                atom_id, epoch
+                                atom_id, epoch_conv
                             )
                             atom.signal_ref = signal_ref
 
@@ -539,10 +549,19 @@ class BCICompIV2aImporter(BaseImporter):
                     },
                 )
 
+                # Convert to pool storage unit (µV → µV, identity)
+                cont_conv, storage_unit, orig_unit = convert_to_storage_unit(
+                    continuous.astype(np.float32), source_unit="uV",
+                    pool_config=self.pool.config,
+                )
+                atom.signal_unit = storage_unit
+                atom.original_unit = orig_unit
+
                 warnings = validate_signal(
-                    signal=continuous.astype(np.float32),
+                    signal=cont_conv,
                     atom_id=atom_id,
                     config=self.pool.config.get("import", {}),
+                    signal_unit=storage_unit,
                 )
                 all_warnings.extend(warnings)
 
@@ -555,7 +574,7 @@ class BCICompIV2aImporter(BaseImporter):
                     max_shard_size_mb=max_shard_mb,
                     compression=compression,
                 ) as shard_mgr:
-                    signal_ref = shard_mgr.write_atom_signal(atom_id, continuous)
+                    signal_ref = shard_mgr.write_atom_signal(atom_id, cont_conv)
                     atom.signal_ref = signal_ref
 
                 jsonl_path = P.atoms_jsonl_path(
@@ -586,6 +605,9 @@ class BCICompIV2aImporter(BaseImporter):
                 },
             )
             self.pool.register_run(run_meta)
+            self._write_channels_json(
+                dataset_id, subject_id, session_id, ch_infos
+            )
 
             results.append(ImportResult(
                 atoms=atoms,

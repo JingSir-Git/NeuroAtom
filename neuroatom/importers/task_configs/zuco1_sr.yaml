@@ -1,0 +1,80 @@
+# ZuCo 1.0 — Sentiment Reading / Normal Reading / Task-Specific Reading
+# Hollenstein, N., Rotsztejn, J., Troendle, M., Pedroni, A.,
+# Zhang, C., & Langer, N. (2018). ZuCo, a simultaneous EEG and
+# eye-tracking resource for natural sentence reading.
+#
+# 12 subjects, 3 tasks per subject:
+#   task1 SR  (Sentiment Reading): 400 sentences, sentiment analysis
+#   task2 NR  (Normal Reading):    300 sentences, relation extraction
+#   task3 TSR (Task-Specific Reading): 407 sentences, relation detection
+#
+# EGI HydroCel 128 → 105 EEG channels @ 500 Hz.
+# Preprocessed with Automagic pipeline (ICA artifact removal).
+# HDF5 (MATLAB v7.3) EEGLAB structure — identical to ZuCo 2.0.
+#
+# File prefixes:
+#   gip_*_EEG.mat: "good ICA points" — cleaned segments (primary)
+#   oip_*_EEG.mat: "ok ICA points" — acceptable quality
+#   bip_*_EEG.mat: "bad ICA points" — artifact-contaminated
+#
+# Eye-tracking data: *_corrected_ET.mat per text per subject
+# Word boundaries: wordbounds_*_SUBJ.mat per text per subject
+
+dataset_id: zuco1
+dataset_name: "ZuCo 1.0 Natural Reading"
+task_type: reading
+format: hdf5_eeglab
+
+sampling_rate: 500
+n_channels: 105
+signal_unit: uV
+
+# Event type mapping (same as ZuCo 2.0)
+events:
+  session_start: "110"
+  sentence_onset: "10"
+  sentence_offset: "11"
+  page_break: "12"
+  page_end: "13"
+
+# File prefix to use
+file_prefix: gip  # "good ICA points" — cleaned data
+
+# Tasks and their text IDs
+tasks:
+  sr:
+    name: "Sentiment Reading"
+    text_prefix: "SR"
+    n_texts: 8
+    text_ids: ["SR1", "SR2", "SR3", "SR4", "SR5", "SR6", "SR7", "SR8"]
+    # Note: some texts may use SNR prefix (e.g. SNR6, SNR7, SNR8)
+  nr:
+    name: "Normal Reading"
+    text_prefix: "NR"
+    n_texts: 6
+    text_ids: ["NR1", "NR2", "NR3", "NR4", "NR5", "NR6"]
+  tsr:
+    name: "Task-Specific Reading"
+    text_prefix: "TSR"
+    n_texts: 7
+    text_ids: ["TSR1", "TSR2", "TSR3", "TSR4", "TSR5", "TSR6", "TSR7"]
+
+custom:
+  n_subjects: 12
+  subjects:
+    - ZAB
+    - ZDM
+    - ZDN
+    - ZGW
+    - ZJM
+    - ZJN
+    - ZJS
+    - ZKB
+    - ZKH
+    - ZKW
+    - ZMG
+    - ZPH
+  has_eye_tracking: true
+  has_word_boundaries: true
+  cap: "EGI HydroCel 128"
+  citation: "Hollenstein et al., Scientific Data 2018"

@@ -110,6 +110,8 @@ def _parse_kul_trial(trial_struct, subject_id: str) -> Dict[str, Any]:
 
 def _parse_kul_mat(mat_path: Path, subject_id: str) -> List[Dict[str, Any]]:
     """Parse all trials from a KUL .mat file."""
+    from neuroatom.utils.mat_compat import require_mat_v5
+    require_mat_v5(mat_path, "AADImporter (KUL)")
     logger.info("Loading KUL .mat: %s", mat_path)
     mat = sio.loadmat(str(mat_path), squeeze_me=True, struct_as_record=False)
     trials_raw = mat["trials"]
@@ -137,6 +139,8 @@ def _parse_dtu_preproc_mat(mat_path: Path, subject_id: str) -> List[Dict[str, An
         data.wavA:      object array (n_trials,), each (n_samples,) — audio envelope A
         data.wavB:      object array (n_trials,), each (n_samples,) — audio envelope B
     """
+    from neuroatom.utils.mat_compat import require_mat_v5
+    require_mat_v5(mat_path, "AADImporter (DTU preproc)")
     logger.info("Loading DTU preprocessed .mat: %s", mat_path)
     mat = sio.loadmat(str(mat_path), squeeze_me=True, struct_as_record=False)
     data = mat["data"]
@@ -219,6 +223,8 @@ def _parse_dtu_raw_mat(mat_path: Path, subject_id: str) -> List[Dict[str, Any]]:
     This is a continuous recording — we return it as a single "trial"
     that the WindowAtomizer can segment.
     """
+    from neuroatom.utils.mat_compat import require_mat_v5
+    require_mat_v5(mat_path, "AADImporter (DTU raw)")
     logger.info("Loading DTU raw .mat: %s", mat_path)
     mat = sio.loadmat(str(mat_path), squeeze_me=True, struct_as_record=False)
     data = mat["data"]
@@ -406,6 +412,7 @@ class AADImporter(BaseImporter):
         from neuroatom.importers.base import ImportResult
         from neuroatom.core.run import RunMeta
         from neuroatom.core.signal_ref import SignalRef
+        from neuroatom.utils.unit_convert import convert_to_storage_unit
         from neuroatom.utils.validation import validate_signal
         from neuroatom.storage.signal_store import ShardManager
         from neuroatom.storage.metadata_store import AtomJSONLWriter
@@ -651,14 +658,22 @@ class AADImporter(BaseImporter):
             max_shard_mb = self.pool.config.get("storage", {}).get("max_shard_size_mb", 200.0)
             compression = self.pool.config.get("storage", {}).get("compression", "gzip")
 
-            # Extract signal data (channels × samples)
+            # Extract signal data (channels × samples) — MNE returns Volts
             signal = raw.get_data().astype(np.float32)
 
-            # Validate signal
+            # Convert to pool storage unit (V → µV)
+            signal, storage_unit, orig_unit = convert_to_storage_unit(
+                signal, source_unit="V", pool_config=self.pool.config,
+            )
+            atom.signal_unit = storage_unit
+            atom.original_unit = orig_unit
+
+            # Validate signal (now in storage unit)
             warnings = validate_signal(
                 signal=signal,
                 atom_id=atom.atom_id,
                 config=self.pool.config.get("import", {}),
+                signal_unit=storage_unit,
             )
 
             # Write to HDF5 shard
@@ -692,6 +707,9 @@ class AADImporter(BaseImporter):
 
             # Register in pool
             self.pool.register_run(run_meta)
+            self._write_channels_json(
+                dataset_id, subject_id, session_id, channel_infos
+            )
 
             logger.info(
                 "Imported %s/%s/%s/%s: trial %d (%d ch × %d samples = %.1fs at %g Hz)",

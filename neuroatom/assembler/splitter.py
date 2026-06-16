@@ -84,7 +84,7 @@ class DataSplitter:
         elif test_subjects:
             remaining = [s for s in subjects if s not in test_subjects]
             rng.shuffle(remaining)
-            n_val = max(1, int(len(remaining) * val_ratio / (1 - test_ratio)))
+            n_val = max(1, int(len(remaining) * val_ratio / (1 - test_ratio))) if val_ratio > 0 else 0
             val_subs = remaining[:n_val]
             train_subs = remaining[n_val:]
             val_subjects = val_subs

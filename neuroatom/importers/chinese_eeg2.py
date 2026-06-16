@@ -43,7 +43,9 @@ mne = _require("mne", "the ChineseEEG-2 importer")
 
 from neuroatom.core.annotation import (
     CategoricalAnnotation,
+    ContinuousAnnotation,
     NumericAnnotation,
+    TextAnnotation,
 )
 from neuroatom.core.atom import Atom, TemporalInfo
 from neuroatom.core.channel import ChannelInfo
@@ -63,6 +65,7 @@ from neuroatom.storage.pool import Pool
 from neuroatom.storage.signal_store import ShardManager
 from neuroatom.utils.channel_names import standardize_channel_name
 from neuroatom.utils.hashing import compute_atom_id
+from neuroatom.utils.unit_convert import convert_to_storage_unit
 from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
@@ -167,6 +170,84 @@ def _extract_sentence_epochs(
     return epochs
 
 
+# Novel name → audio embedding folder prefix
+_NOVEL_TO_AUDIO_PREFIX: Dict[str, str] = {
+    "littleprince": "xiaowangzi",
+    "garnettdream": "langwangmeng",
+}
+
+# ReadingAloud sub IDs → audio embedding suffix
+_SUBJECT_TO_AUDIO_SUFFIX: Dict[str, str] = {
+    "f1": "female_subject_1",
+    "f2": "female_subject_2",
+    "m1": "male_subject_1",
+    "m2": "male_subject_2",
+}
+
+
+def _load_text_embeddings_novel(
+    materials_root: Path, novel: str,
+) -> Optional[np.ndarray]:
+    """Load global BERT text embeddings for an entire novel.
+
+    Returns array of shape (N_sentences, 768) or None.
+    """
+    npy_path = materials_root / "text_embedding" / f"text_embeddings_{novel.lower()}.npy"
+    if not npy_path.exists():
+        return None
+    try:
+        return np.load(str(npy_path)).astype(np.float32)
+    except Exception as exc:
+        logger.debug("Could not load text embeddings from %s: %s", npy_path, exc)
+        return None
+
+
+def _load_audio_embedding_chapter(
+    materials_root: Path,
+    novel: str,
+    chapter_idx: int,
+    subject_id: Optional[str] = None,
+) -> Optional[np.ndarray]:
+    """Load audio embedding for one chapter (0-based chapter_idx).
+
+    For ReadingAloud, subject_id (e.g. 'f1') selects the speaker folder.
+    For PassiveListening, uses the first available folder for the novel.
+
+    Returns flat array of shape (1024,) or None.
+    """
+    novel_prefix = _NOVEL_TO_AUDIO_PREFIX.get(novel.lower())
+    if novel_prefix is None:
+        return None
+
+    ae_root = materials_root / "audio_embedding"
+    if not ae_root.exists():
+        return None
+
+    # Determine suffix: ReadingAloud subject or first available
+    if subject_id is not None:
+        suffix = _SUBJECT_TO_AUDIO_SUFFIX.get(subject_id)
+        if suffix:
+            candidate_dirs = [ae_root / f"{novel_prefix}_{suffix}"]
+        else:
+            candidate_dirs = []
+    else:
+        # PassiveListening: pick the first matching dir (female_subject_1)
+        candidate_dirs = [
+            ae_root / f"{novel_prefix}_female_subject_1",
+            ae_root / f"{novel_prefix}_male_subject_1",
+        ]
+
+    for ae_dir in candidate_dirs:
+        npy_path = ae_dir / f"audio_embedding_audio_{chapter_idx}.npy"
+        if npy_path.exists():
+            try:
+                arr = np.load(str(npy_path)).astype(np.float32)
+                return arr.ravel()  # flatten (1, 1024) → (1024,)
+            except Exception as exc:
+                logger.debug("Could not load audio embedding %s: %s", npy_path, exc)
+    return None
+
+
 class ChineseEEG2Importer:
     """Importer for ChineseEEG-2 BIDS dataset.
 
@@ -197,12 +278,14 @@ class ChineseEEG2Importer:
         use_preprocessed: bool = False,
         max_shard_mb: int = 200,
         compression: str = "gzip",
+        materials_root: Optional[Path] = None,
     ):
         self.pool = pool
         self.task = task
         self.use_preprocessed = use_preprocessed
         self.max_shard_mb = max_shard_mb
         self.compression = compression
+        self.materials_root = Path(materials_root) if materials_root else None
 
         if task == "listening":
             self.dataset_id = "chinese_eeg2_listening"
@@ -370,11 +453,72 @@ class ChineseEEG2Importer:
                 ))
                 registered_subjects.add(sub_id)
 
+        # Locate materials root (text/audio embeddings)
+        materials_root = self.materials_root
+        if materials_root is None:
+            # Try sibling of bids_root: ChineseEEG-2/materials&embeddings
+            candidate = bids_root.parent / "materials&embeddings"
+            if candidate.exists():
+                materials_root = candidate
+
+        # Pre-load text embeddings per novel (cached across runs)
+        _text_emb_cache: Dict[str, Optional[np.ndarray]] = {}
+
+        # Compute global sentence offsets per (subject, session, run)
+        # Group recordings by (subject, session) to find ordered runs
+        ses_run_counts: Dict[Tuple[str, str], Dict[str, int]] = {}
+        if materials_root is not None:
+            for rec in recordings:
+                ses_key = (rec["subject"], rec.get("session", ""))
+                if ses_key not in ses_run_counts:
+                    ses_run_counts[ses_key] = {}
+                n_sents = 0
+                if rec.get("events_tsv"):
+                    ep = _extract_sentence_epochs(
+                        rec["events_tsv"],
+                        1000.0,  # approximate; exact sfreq not needed for counting
+                        self.start_marker,
+                        self.end_marker,
+                    )
+                    n_sents = len(ep)
+                ses_run_counts[ses_key][rec["run"]] = n_sents
+
+        # Build cumulative offsets: sort runs by (repetition, chapter) numerically
+        global_offsets: Dict[Tuple[str, str, str], int] = {}
+        for (sub, ses), run_counts in ses_run_counts.items():
+            sorted_runs = sorted(
+                run_counts.keys(),
+                key=lambda r: _parse_run_id(f"run-{r}"),
+            )
+            offset = 0
+            for run in sorted_runs:
+                global_offsets[(sub, ses, run)] = offset
+                offset += run_counts[run]
+
         # Import each run
         results = []
         for rec in recordings:
             try:
-                result = self._import_run(rec, bids_root)
+                novel = rec.get("session", "unknown")
+                # Get cached text embeddings for this novel
+                text_emb = None
+                if materials_root is not None and novel != "unknown":
+                    if novel not in _text_emb_cache:
+                        _text_emb_cache[novel] = _load_text_embeddings_novel(
+                            materials_root, novel,
+                        )
+                    text_emb = _text_emb_cache[novel]
+
+                g_offset = global_offsets.get(
+                    (rec["subject"], rec.get("session", ""), rec["run"]), 0
+                )
+
+                result = self._import_run(
+                    rec, bids_root,
+                    materials_root=materials_root,
+                    text_embeddings=text_emb,
+                    global_sent_offset=g_offset,
+                )
                 results.append(result)
                 logger.info(
                     "Imported %s/%s/%s: %d sentence atoms",
@@ -399,6 +543,9 @@ class ChineseEEG2Importer:
         self,
         rec: Dict[str, Any],
         bids_root: Path,
+        materials_root: Optional[Path] = None,
+        text_embeddings: Optional[np.ndarray] = None,
+        global_sent_offset: int = 0,
     ) -> ImportResult:
         """Import a single run: load EEG, extract sentence epochs, store atoms."""
         sub_id = f"sub-{rec['subject']}"
@@ -406,6 +553,19 @@ class ChineseEEG2Importer:
         run_id = f"run-{rec['run']}"
         repetition, chapter = _parse_run_id(run_id)
         novel = rec.get("session", "unknown")
+        # chapter is 1-based from run ID; audio embedding uses 0-based index
+        audio_chapter_idx = chapter - 1
+
+        # Load audio embedding for this chapter (if materials available)
+        audio_emb: Optional[np.ndarray] = None
+        if materials_root is not None and novel != "unknown":
+            subject_raw = rec["subject"]  # e.g. 'f1', 'm2' for ReadingAloud
+            sub_id_for_audio = (
+                subject_raw if subject_raw in _SUBJECT_TO_AUDIO_SUFFIX else None
+            )
+            audio_emb = _load_audio_embedding_chapter(
+                materials_root, novel, audio_chapter_idx, sub_id_for_audio,
+            )
 
         # Register session
         sfreq_nominal = 1000.0 if self.task == "listening" else 250.0
@@ -510,29 +670,85 @@ class ChineseEEG2Importer:
                         onset_sample=onset,
                     )
 
+                    sent_idx = epoch["sentence_index"]
+                    global_sent_idx = global_sent_offset + sent_idx
+
+                    # Companion arrays for embedding annotations
+                    ann_arrays: Dict[str, np.ndarray] = {}
+
                     # Annotations
                     annotations = [
                         CategoricalAnnotation(
-                            annotation_id=f"ann_novel_{run_id}_{epoch['sentence_index']:04d}",
+                            annotation_id=f"ann_novel_{run_id}_{sent_idx:04d}",
                             name="novel",
                             value=novel,
                         ),
                         NumericAnnotation(
-                            annotation_id=f"ann_chapter_{run_id}_{epoch['sentence_index']:04d}",
+                            annotation_id=f"ann_chapter_{run_id}_{sent_idx:04d}",
                             name="chapter",
                             numeric_value=float(chapter),
                         ),
                         NumericAnnotation(
-                            annotation_id=f"ann_rep_{run_id}_{epoch['sentence_index']:04d}",
+                            annotation_id=f"ann_rep_{run_id}_{sent_idx:04d}",
                             name="repetition",
                             numeric_value=float(repetition),
                         ),
                         NumericAnnotation(
-                            annotation_id=f"ann_sent_{run_id}_{epoch['sentence_index']:04d}",
+                            annotation_id=f"ann_sent_{run_id}_{sent_idx:04d}",
                             name="sentence_index",
-                            numeric_value=float(epoch["sentence_index"]),
+                            numeric_value=float(sent_idx),
                         ),
                     ]
+
+                    # BERT text embedding (global sentence index into novel)
+                    if (
+                        text_embeddings is not None
+                        and global_sent_idx < text_embeddings.shape[0]
+                    ):
+                        emb_vec = text_embeddings[global_sent_idx]  # (768,)
+                        ann_arrays["text_embedding"] = emb_vec
+                        annotations.append(ContinuousAnnotation(
+                            annotation_id=f"ann_textemb_{run_id}_{sent_idx:04d}",
+                            name="text_embedding",
+                            domain="stimulus",
+                            scope="atom",
+                            data_ref=SignalRef(
+                                file_path="__placeholder__",
+                                internal_path="__placeholder__/annotations/text_embedding",
+                                shape=(int(emb_vec.shape[0]),),
+                            ),
+                            data_sampling_rate=1.0,
+                            alignment_method="sample_aligned",
+                            custom_fields={
+                                "embedding_model": "BERT-base-Chinese",
+                                "embedding_dim": int(emb_vec.shape[0]),
+                                "global_sentence_index": global_sent_idx,
+                                "novel": novel,
+                            },
+                        ))
+
+                    # Audio embedding (one per chapter/run)
+                    if audio_emb is not None:
+                        ann_arrays["audio_embedding"] = audio_emb
+                        annotations.append(ContinuousAnnotation(
+                            annotation_id=f"ann_audioemb_{run_id}_{sent_idx:04d}",
+                            name="audio_embedding",
+                            domain="stimulus",
+                            scope="atom",
+                            data_ref=SignalRef(
+                                file_path="__placeholder__",
+                                internal_path="__placeholder__/annotations/audio_embedding",
+                                shape=(int(audio_emb.shape[0]),),
+                            ),
+                            data_sampling_rate=1.0,
+                            alignment_method="sample_aligned",
+                            custom_fields={
+                                "embedding_model": "Wav2Vec2",
+                                "embedding_dim": int(audio_emb.shape[0]),
+                                "chapter_index": audio_chapter_idx,
+                                "novel": novel,
+                            },
+                        ))
 
                     atom = Atom(
                         atom_id=atom_id,
@@ -541,7 +757,7 @@ class ChineseEEG2Importer:
                         subject_id=sub_id,
                         session_id=ses_id,
                         run_id=run_id,
-                        trial_index=epoch["sentence_index"],
+                        trial_index=sent_idx,
                         signal_ref=SignalRef(
                             file_path="__placeholder__",
                             internal_path=f"/atoms/{atom_id}/signal",
@@ -579,23 +795,35 @@ class ChineseEEG2Importer:
                             "novel": novel,
                             "chapter": chapter,
                             "repetition": repetition,
-                            "sentence_index": epoch["sentence_index"],
+                            "sentence_index": sent_idx,
+                            "global_sentence_index": global_sent_idx,
                             "paradigm": "passive_listening" if self.task == "listening" else "reading_aloud",
                         },
                     )
 
+                    # Convert to pool storage unit (V → µV)
+                    signal, storage_unit, orig_unit = convert_to_storage_unit(
+                        signal, source_unit="V", pool_config=self.pool.config,
+                    )
+                    atom.signal_unit = storage_unit
+                    atom.original_unit = orig_unit
+
                     # Validate (first 5s)
                     max_val_samples = int(5 * sfreq)
-                    val_sig = signal[:, :min(max_val_samples, signal.shape[1])].astype(np.float32)
+                    val_sig = signal[:, :min(max_val_samples, signal.shape[1])]
                     warnings = validate_signal(
                         signal=val_sig,
                         atom_id=atom_id,
-                        config={},
+                        config=self.pool.config.get("import", {}),
+                        signal_unit=storage_unit,
                     )
                     all_warnings.extend(warnings)
 
-                    # Write signal
-                    signal_ref = shard_mgr.write_atom_signal(atom_id, signal)
+                    # Write signal (+ companion embedding arrays)
+                    signal_ref = shard_mgr.write_atom_signal(
+                        atom_id, signal,
+                        ann_arrays if ann_arrays else None,
+                    )
                     atom.signal_ref = signal_ref
 
                     writer.write_atom(atom)
@@ -617,6 +845,25 @@ class ChineseEEG2Importer:
             },
         )
         self.pool.register_run(run_meta)
+
+        # Persist channel_id → standard_name mapping
+        ch_file = P.channels_path(
+            self.pool.root, self.dataset_id, sub_id, ses_id
+        )
+        if not ch_file.exists():
+            ch_file.parent.mkdir(parents=True, exist_ok=True)
+            records = [
+                {
+                    "channel_id": ch.channel_id,
+                    "name": ch.name,
+                    "standard_name": ch.standard_name,
+                    "channel_type": ch.type.value if ch.type else None,
+                }
+                for ch in ch_infos
+            ]
+            with open(ch_file, "w", encoding="utf-8") as f:
+                json.dump(records, f, indent=2, ensure_ascii=False)
+
         return ImportResult(
             atoms=atoms,
             run_meta=run_meta,

@@ -1,23 +1,25 @@
 """High-level convenience API for NeuroAtom.
 
-Get from raw data to a PyTorch DataLoader in ~5 lines::
+Single subject (5 lines)::
 
     import neuroatom as na
+    loader = na.quickload("bci_comp_iv_2a", "data/A01T.mat")
 
-    loader = na.quickload(
-        "bci_comp_iv_2a",
-        data_path="data/A01T.mat",
-        subject="A01",
-        batch_size=32,
+Cross-subject / cross-dataset / cross-task (~10 lines)::
+
+    loader = na.multiload(
+        sources=[
+            {"dataset": "openbmi_mi",     "path": "OpenBMI/MI",  "subjects": ["S01", "S02"]},
+            {"dataset": "bci_comp_iv_2a", "path": "data/A01T.mat"},
+            {"dataset": "physionet_mi",   "path": "Physionet/S001"},
+        ],
+        target_channels=["C3", "Cz", "C4", ...],  # unify channel layout
+        target_srate=250,
+        label_field="mi_class",
     )
 
-    for batch in loader:
-        signals = batch["signal"]   # (B, C, T)
-        labels  = batch["labels"]   # dict of tensors
-        break
-
 For full control, use the lower-level :class:`Pool`, :class:`Indexer`,
-:class:`DatasetAssembler` APIs directly.
+:class:`DatasetAssembler`, or :class:`FederatedAssembler` APIs directly.
 """
 
 import logging
@@ -195,6 +197,321 @@ def quickload(
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# multiload: cross-subject / cross-dataset / cross-task convenience API
+# ══════════════════════════════════════════════════════════════════════════
+
+def multiload(
+    sources: List[Dict[str, Any]],
+    *,
+    pool_dir: Union[str, Path, None] = None,
+    target_channels: Optional[List[str]] = None,
+    target_srate: Optional[float] = None,
+    target_duration: Optional[float] = None,
+    band: Optional[Tuple[float, float]] = None,
+    target_unit: str = "uV",
+    label_field: Optional[str] = None,
+    batch_size: int = 32,
+    shuffle_train: bool = True,
+    split_strategy: str = "subject",
+    split_config: Optional[Dict[str, Any]] = None,
+    extra_recipe_kwargs: Optional[Dict[str, Any]] = None,
+    normalization: str = "zscore",
+    normalization_scope: str = "per_atom",
+):
+    """Import multiple data sources → unified assembly → DataLoader(s).
+
+    Designed for the core NeuroAtom use case: **cross-subject, cross-dataset,
+    and cross-task** training on heterogeneous EEG data.
+
+    Each source is a dict with:
+        - ``dataset`` (str): registered dataset name (e.g. ``"openbmi_mi"``).
+        - ``path`` (str|Path): file or directory containing data.
+        - ``subjects`` (list[str], optional): specific subjects to import.
+          If omitted, auto-inferred from path (single file) or import all
+          (directory with ``import_paradigm`` / ``import_dataset``).
+        - ``import_kwargs`` (dict, optional): extra kwargs for the importer.
+
+    The function creates a **single shared Pool**, imports all sources,
+    builds a unified SQLite index, assembles with ChannelMapper +
+    Resampler + Filter + Normalizer, and returns PyTorch DataLoaders.
+
+    Args:
+        sources: List of source dicts (see above).
+        pool_dir: Pool directory. Defaults to a temp dir.
+        target_channels: Common channel layout (e.g. 22 standard MI channels).
+            If None, keeps all channels from each atom (heterogeneous output).
+        target_srate: Target sampling rate in Hz.
+        target_duration: Target epoch duration in seconds (pad/crop).
+        band: Bandpass filter ``(low_hz, high_hz)``.
+        target_unit: Signal unit after assembly ("uV", "mV", "V").
+        label_field: Primary annotation name for labels. Auto-inferred if
+            all sources share the same paradigm.
+        batch_size: Batch size for DataLoaders.
+        shuffle_train: Shuffle training DataLoader.
+        split_strategy: ``"subject"`` (default), ``"stratified"``, ``"dataset"``.
+        split_config: Strategy-specific params (e.g. ``{"test_ratio": 0.2}``).
+        extra_recipe_kwargs: Additional ``AssemblyRecipe`` fields.
+        normalization: ``"zscore"`` (default), ``"robust"``, ``"minmax"``, or ``None``.
+        normalization_scope: ``"per_atom"`` (default), ``"global"``, ``"per_subject"``.
+
+    Returns:
+        ``(train_loader, val_loader, test_loader)`` — any may be ``None`` if the
+        split produces no samples for that partition.
+
+    Example — cross-dataset MI pre-training::
+
+        import neuroatom as na
+
+        train, val, test = na.multiload(
+            sources=[
+                {"dataset": "openbmi_mi", "path": r"\\\\server\\OpenBMI\\MI",
+                 "subjects": ["S01", "S02", "S03"]},
+                {"dataset": "bci_comp_iv_2a", "path": "data/A01T.mat"},
+                {"dataset": "bci_comp_iv_2a", "path": "data/A02T.mat"},
+            ],
+            target_channels=["C3", "C1", "Cz", "C2", "C4"],  # subset
+            target_srate=250,
+            target_duration=4.0,
+            label_field="mi_class",
+            split_strategy="subject",
+        )
+
+        for batch in train:
+            x = batch["signal"]   # (B, 5, 1000) — unified!
+            y = batch["labels"]   # {"mi_class": tensor}
+            break
+    """
+    from neuroatom.storage.pool import Pool
+    from neuroatom.importers.base import TaskConfig
+    from neuroatom.importers.registry import get_importer
+    from neuroatom.index.indexer import Indexer
+    from neuroatom.core.recipe import AssemblyRecipe, LabelSpec
+    from neuroatom.core.enums import (
+        NormalizationMethod, NormalizationScope, SplitStrategy,
+    )
+    from neuroatom.assembler.dataset_assembler import DatasetAssembler
+
+    if not sources:
+        raise ValueError("multiload() requires at least one source.")
+
+    extra_recipe_kwargs = extra_recipe_kwargs or {}
+    split_config = split_config or {}
+
+    # ── 1. Create or open pool ────────────────────────────────────────
+    if pool_dir is None:
+        pool_dir = Path(tempfile.mkdtemp(prefix="neuroatom_multi_"))
+    else:
+        pool_dir = Path(pool_dir)
+
+    if (pool_dir / "pool.json").exists():
+        pool = Pool.open(pool_dir)
+    else:
+        pool = Pool.create(pool_dir)
+
+    logger.info(
+        "multiload: %d sources → pool at %s", len(sources), pool_dir
+    )
+
+    # ── 2. Import each source ─────────────────────────────────────────
+    datasets_imported = set()
+
+    for src_idx, src in enumerate(sources):
+        ds_name = src["dataset"]
+        data_path = Path(src["path"])
+        subjects = src.get("subjects")
+        import_kwargs = src.get("import_kwargs", {})
+
+        config_name = _resolve_config_name(ds_name)
+        config = TaskConfig.builtin(config_name)
+        importer = get_importer(ds_name, pool, config)
+
+        if subjects:
+            # Import specific subjects
+            for subj in subjects:
+                logger.info(
+                    "  [%d/%d] %s / %s from %s",
+                    src_idx + 1, len(sources), ds_name, subj, data_path,
+                )
+                _do_import(importer, ds_name, data_path, subj, import_kwargs)
+        else:
+            # Try import_paradigm (OpenBMI), import_dataset (ChineseEEG2),
+            # or single-file import
+            if hasattr(importer, "import_paradigm") and data_path.is_dir():
+                # OpenBMI-style: extract paradigm from dataset name
+                paradigm_map = {
+                    "openbmi_mi": "MI",
+                    "openbmi_erp": "ERP",
+                    "openbmi_ssvep": "SSVEP",
+                }
+                paradigm = paradigm_map.get(ds_name)
+                if paradigm:
+                    logger.info(
+                        "  [%d/%d] %s (all subjects) from %s",
+                        src_idx + 1, len(sources), ds_name, data_path,
+                    )
+                    importer.import_paradigm(
+                        data_dir=data_path,
+                        paradigm=paradigm,
+                        **import_kwargs,
+                    )
+                else:
+                    # Generic directory: infer subject
+                    subj = _infer_subject(data_path, ds_name)
+                    _do_import(importer, ds_name, data_path, subj, import_kwargs)
+            elif hasattr(importer, "import_dataset") and data_path.is_dir():
+                logger.info(
+                    "  [%d/%d] %s (full dataset) from %s",
+                    src_idx + 1, len(sources), ds_name, data_path,
+                )
+                importer.import_dataset(bids_root=data_path, **import_kwargs)
+            else:
+                subj = _infer_subject(data_path, ds_name)
+                logger.info(
+                    "  [%d/%d] %s / %s from %s",
+                    src_idx + 1, len(sources), ds_name, subj, data_path,
+                )
+                _do_import(importer, ds_name, data_path, subj, import_kwargs)
+
+        datasets_imported.add(ds_name)
+
+    # ── 3. Index ──────────────────────────────────────────────────────
+    indexer = Indexer(pool)
+    n_indexed = indexer.reindex_all()
+    logger.info("multiload: indexed %d atoms.", n_indexed)
+
+    if n_indexed == 0:
+        raise RuntimeError(
+            f"Import produced 0 atoms across {len(sources)} sources. "
+            "Check data paths and subject identifiers."
+        )
+
+    # ── 4. Resolve label field ────────────────────────────────────────
+    if label_field is None:
+        # Try to auto-infer from the first dataset
+        for ds_name in datasets_imported:
+            lf = _KNOWN_LABEL_FIELDS.get(ds_name)
+            if lf:
+                label_field = lf
+                break
+
+    if label_field is None:
+        logger.warning(
+            "Could not auto-detect label_field for datasets %s. "
+            "Using 'atom_type' as placeholder.",
+            datasets_imported,
+        )
+        label_field = "atom_type"
+
+    # ── 5. Build recipe ───────────────────────────────────────────────
+    # Query: all atoms from imported datasets
+    query: Dict[str, Any] = {}
+    if len(datasets_imported) > 0:
+        # Use all dataset_ids from imported sources
+        all_ds_ids = set()
+        for src in sources:
+            cfg_name = _resolve_config_name(src["dataset"])
+            try:
+                cfg = TaskConfig.builtin(cfg_name)
+                all_ds_ids.add(cfg.dataset_id)
+            except Exception:
+                all_ds_ids.add(src["dataset"])
+        query["dataset_id"] = sorted(all_ds_ids)
+
+    # Map string split_strategy to enum
+    strategy_map = {
+        "subject": SplitStrategy.SUBJECT,
+        "stratified": SplitStrategy.STRATIFIED,
+        "dataset": SplitStrategy.DATASET,
+        "temporal": SplitStrategy.TEMPORAL,
+        "predefined": SplitStrategy.PREDEFINED,
+    }
+    split_strat = strategy_map.get(
+        split_strategy, SplitStrategy.SUBJECT
+    )
+
+    # Map normalization strings
+    norm_method = None
+    if normalization:
+        norm_map = {
+            "zscore": NormalizationMethod.ZSCORE,
+            "robust": NormalizationMethod.ROBUST,
+            "minmax": NormalizationMethod.MINMAX,
+        }
+        norm_method = norm_map.get(normalization)
+
+    scope_map = {
+        "per_atom": NormalizationScope.PER_ATOM,
+        "global": NormalizationScope.GLOBAL,
+        "per_subject": NormalizationScope.PER_SUBJECT,
+        "per_channel": NormalizationScope.PER_CHANNEL,
+    }
+    norm_scope = scope_map.get(
+        normalization_scope, NormalizationScope.PER_ATOM
+    )
+
+    recipe_kw: Dict[str, Any] = {
+        "recipe_id": f"multiload_{'_'.join(sorted(datasets_imported))}",
+        "query": query,
+        "target_unit": target_unit,
+        "label_fields": [
+            LabelSpec(annotation_name=label_field, output_key=label_field),
+        ],
+        "split_strategy": split_strat,
+        "split_config": split_config,
+    }
+    if target_channels:
+        recipe_kw["target_channels"] = target_channels
+    if target_srate:
+        recipe_kw["target_sampling_rate"] = target_srate
+    if target_duration:
+        recipe_kw["target_duration"] = target_duration
+    if band:
+        recipe_kw["filter_band"] = band
+    if norm_method:
+        recipe_kw["normalization_method"] = norm_method
+        recipe_kw["normalization_scope"] = norm_scope
+
+    recipe_kw.update(extra_recipe_kwargs)
+    recipe = AssemblyRecipe(**recipe_kw)
+
+    # ── 6. Assemble ───────────────────────────────────────────────────
+    result = DatasetAssembler(pool, indexer).assemble(recipe)
+    indexer.close()
+
+    logger.info(
+        "multiload assembly: %d train, %d val, %d test from %d sources.",
+        len(result.train_samples), len(result.val_samples),
+        len(result.test_samples), len(sources),
+    )
+
+    # ── 7. DataLoaders ────────────────────────────────────────────────
+    try:
+        import torch  # noqa: F401
+        from torch.utils.data import DataLoader
+        from neuroatom.loader.torch_dataset import AtomDataset
+    except ImportError:
+        raise ImportError(
+            "PyTorch is required for multiload. "
+            "Install with: pip install neuroatom[torch]"
+        ) from None
+
+    def _make_loader(samples, shuffle):
+        if not samples:
+            return None
+        return DataLoader(
+            AtomDataset(samples),
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+
+    train_loader = _make_loader(result.train_samples, shuffle_train)
+    val_loader = _make_loader(result.val_samples, False)
+    test_loader = _make_loader(result.test_samples, False)
+
+    return train_loader, val_loader, test_loader
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Internal helpers
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -237,6 +554,7 @@ _KNOWN_LABEL_FIELDS: Dict[str, str] = {
     "zuco2_tsr": "sentence_id",
     "zuco2": "sentence_id",
     "ccep_bids_npy": "stim_pair",
+    "chinese_eeg_reading": "sentence_index",
     "chinese_eeg2": "sentence_index",
     "chinese_eeg2_listening": "sentence_index",
     "chinese_eeg2_reading": "sentence_index",
@@ -313,6 +631,15 @@ def _do_import(importer, dataset: str, data_path: Path, subject: str, kwargs: di
     if dataset == "ccep_bids_npy":
         importer.import_subject(
             subject_dir=data_path,
+            subject_id=subject,
+            **kwargs,
+        )
+        return
+
+    # ── ChineseEEG (reading) ────────────────────────────────────────────
+    if dataset == "chinese_eeg_reading":
+        importer.import_subject(
+            bids_root=data_path,
             subject_id=subject,
             **kwargs,
         )

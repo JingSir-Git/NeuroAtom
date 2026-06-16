@@ -76,6 +76,7 @@ class FederatedAssembler:
 
     def __init__(self, federation: FederatedPool):
         self._fed = federation
+        self._ch_name_cache: Dict[Tuple[str, str, str, int], Dict[str, str]] = {}
 
     def assemble(self, recipe: AssemblyRecipe) -> AssemblyResult:
         """Execute the assembly pipeline across federated pools.
@@ -315,15 +316,14 @@ class FederatedAssembler:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _load_and_preprocess(
-        atom, pool_root, unit_std, reref, ch_mapper, sig_filter, resampler, recipe,
+        self, atom, pool_root, unit_std, reref, ch_mapper, sig_filter, resampler, recipe,
     ):
         """Load signal from the correct pool and run pipeline steps."""
         signal = ShardManager.static_read(pool_root, atom.signal_ref)
 
-        # Unit standardize
-        source_unit = "V"
+        # Unit standardize — read the declared unit from atom metadata
+        source_unit = getattr(atom, "signal_unit", "V")
         signal = unit_std.convert(signal, source_unit, recipe.error_handling.value)
 
         # Re-reference
@@ -337,21 +337,61 @@ class FederatedAssembler:
 
         # Channel map
         if ch_mapper:
-            source_map = {ch_id: idx for idx, ch_id in enumerate(atom.channel_ids)}
+            ch_id_to_std = self._get_channel_name_map(
+                atom.dataset_id, atom.subject_id, atom.session_id, pool_root
+            )
+            source_map: Dict[str, int] = {}
+            for idx, ch_id in enumerate(atom.channel_ids):
+                std_name = ch_id_to_std.get(ch_id)
+                if std_name:
+                    source_map[std_name] = idx
+                else:
+                    source_map[ch_id] = idx
             mapped, _ = ch_mapper.apply(signal, source_map)
             if mapped is None:
                 return None
             signal = mapped
 
-        # Filter
-        if sig_filter:
-            signal = sig_filter.apply(signal)
-
-        # Resample
+        # Resample first — resample_poly includes anti-aliasing.
         if resampler:
             signal = resampler.apply(signal, atom.sampling_rate)
 
+        # Filter (after resample — uniform rate)
+        if sig_filter:
+            signal = sig_filter.apply(signal)
+
         return signal
+
+    def _get_channel_name_map(
+        self, dataset_id: str, subject_id: str, session_id: str, pool_root,
+    ) -> Dict[str, str]:
+        """Return {channel_id: standard_name} from channels.json, with caching."""
+        from pathlib import Path
+        from neuroatom.storage import paths as P
+        import json
+
+        key = (dataset_id, subject_id, session_id, id(pool_root))
+        if key in self._ch_name_cache:
+            return self._ch_name_cache[key]
+
+        ch_file = P.channels_path(
+            Path(pool_root), dataset_id, subject_id, session_id
+        )
+        mapping: Dict[str, str] = {}
+        if ch_file.exists():
+            try:
+                with open(ch_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for ch in data:
+                    ch_id = ch.get("channel_id")
+                    std_name = ch.get("standard_name")
+                    if ch_id and std_name:
+                        mapping[ch_id] = std_name
+            except Exception as e:
+                logger.warning("Could not load channel map from %s: %s", ch_file, e)
+
+        self._ch_name_cache[key] = mapping
+        return mapping
 
     @staticmethod
     def _get_scope_key(atom: Atom, scope: NormalizationScope) -> str:

@@ -49,6 +49,7 @@ from neuroatom.importers.registry import register_importer
 from neuroatom.storage.pool import Pool
 from neuroatom.utils.channel_names import standardize_channel_name
 from neuroatom.utils.hashing import compute_atom_id
+from neuroatom.utils.unit_convert import convert_to_storage_unit
 from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ class SEEDVImporter(BaseImporter):
         # Load trial timestamps and emotion order from task config
         self._trial_ts = task_config.data.get("trial_timestamps", {})
         self._emotion_order = task_config.data.get("emotion_order", {})
+        self._video_clips = task_config.data.get("video_clips", {})
         self._exclude = set(task_config.exclude_channels) or DEFAULT_EXCLUDE
 
     @staticmethod
@@ -269,8 +271,10 @@ class SEEDVImporter(BaseImporter):
             emotions = emotions[:max_trials]
 
         # Load CNT lazily (header only first)
+        from neuroatom.utils.validation import validate_sampling_rate
         raw = mne.io.read_raw_cnt(str(cnt_path), preload=False, verbose=False)
         srate = raw.info["sfreq"]
+        validate_sampling_rate(srate, f"SEED-V session {session_num}")
         total_samples = len(raw.times)
 
         # Build channel info (EEG only)
@@ -352,7 +356,26 @@ class SEEDVImporter(BaseImporter):
                             name="session",
                             value=f"session_{session_num}",
                         ),
+                        NumericAnnotation(
+                            annotation_id=f"ann_trial_{run_id}_{trial_idx:04d}",
+                            name="trial_index",
+                            numeric_value=float(trial_idx),
+                        ),
                     ]
+
+                    # Video clip ID from protocol (if available in config)
+                    session_clips = self._video_clips.get(
+                        f"session_{session_num}", []
+                    )
+                    if trial_idx < len(session_clips):
+                        annotations.append(CategoricalAnnotation(
+                            annotation_id=f"ann_clip_{run_id}_{trial_idx:04d}",
+                            name="video_clip",
+                            value=session_clips[trial_idx],
+                            custom_fields={
+                                "source": "protocol_defined",
+                            },
+                        ))
 
                     atom_id = compute_atom_id(
                         dataset_id=dataset_id,
@@ -416,12 +439,20 @@ class SEEDVImporter(BaseImporter):
                         },
                     )
 
+                    # Convert to pool storage unit (V → µV)
+                    signal, storage_unit, orig_unit = convert_to_storage_unit(
+                        signal, source_unit="V", pool_config=self.pool.config,
+                    )
+                    atom.signal_unit = storage_unit
+                    atom.original_unit = orig_unit
+
                     # Validate (use first 10s to keep fast)
-                    val_signal = signal[:, :min(10000, signal.shape[1])].astype(np.float32)
+                    val_signal = signal[:, :min(10000, signal.shape[1])]
                     warnings = validate_signal(
                         signal=val_signal,
                         atom_id=atom_id,
                         config=self.pool.config.get("import", {}),
+                        signal_unit=storage_unit,
                     )
                     all_warnings.extend(warnings)
 
@@ -510,6 +541,9 @@ class SEEDVImporter(BaseImporter):
                     n_trials=len(atoms),
                 )
                 self.pool.register_run(run_meta)
+                self._write_channels_json(
+                    dataset_id, subject_id, session_id, ch_infos
+                )
                 results.append(ImportResult(
                     atoms=atoms,
                     run_meta=run_meta,

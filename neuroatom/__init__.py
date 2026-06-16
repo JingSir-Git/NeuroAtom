@@ -3,15 +3,21 @@
 Decompose heterogeneous EEG datasets into standardized atomic units
 with rich metadata, enabling unified querying and ML pipeline integration.
 
-Quick-start (5 lines to a DataLoader)::
+Quick-start — single subject (5 lines)::
 
     import neuroatom as na
+    loader = na.quickload("bci_comp_iv_2a", "data/A01T.mat")
 
-    loader = na.quickload(
-        "bci_comp_iv_2a",
-        data_path="data/A01T.mat",
-        subject="A01",
-        batch_size=32,
+Cross-subject / cross-dataset / cross-task (~10 lines)::
+
+    train, val, test = na.multiload(
+        sources=[
+            {"dataset": "openbmi_mi",     "path": "OpenBMI/MI", "subjects": ["S01", "S02"]},
+            {"dataset": "bci_comp_iv_2a", "path": "data/A01T.mat"},
+        ],
+        target_channels=["C3", "Cz", "C4"],
+        target_srate=250,
+        label_field="mi_class",
     )
 
 For full control, use the lower-level API::
@@ -33,6 +39,7 @@ from neuroatom.core.enums import (
     ErrorHandling,
     NormalizationMethod,
     NormalizationScope,
+    QualityTier,
     SplitStrategy,
 )
 from neuroatom.core.quality import QualityInfo
@@ -70,7 +77,7 @@ from neuroatom.index.import_log import log_import, get_import_history
 from neuroatom.importers.base import BaseImporter, ImportResult, TaskConfig
 
 # ── High-level convenience API ────────────────────────────────────────
-from neuroatom.quick import quickload
+from neuroatom.quick import quickload, multiload
 from neuroatom.importers.registry import get_importer_class, list_formats
 
 __all__ = [
@@ -91,6 +98,7 @@ __all__ = [
     "ErrorHandling",
     "NormalizationMethod",
     "NormalizationScope",
+    "QualityTier",
     "SplitStrategy",
     # recipe
     "AssemblyRecipe",
@@ -119,6 +127,7 @@ __all__ = [
     "TaskConfig",
     # convenience API
     "quickload",
+    "multiload",
     "get_importer_class",
     "list_formats",
 ]

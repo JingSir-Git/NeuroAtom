@@ -47,3 +47,6 @@ checkpoints/
 # Misc
 *.log
 *.bak
+
+# Claude Code
+.claude/

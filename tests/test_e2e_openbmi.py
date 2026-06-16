@@ -15,6 +15,7 @@ from neuroatom.importers.openbmi import (
     OpenBMIImporter,
     _detect_openbmi,
     _parse_filename,
+    _parse_questionnaire,
 )
 from neuroatom.storage.pool import Pool
 
@@ -353,3 +354,88 @@ class TestIndexAndQuery:
         # Query SSVEP only
         ssvep_ids = qb.query_atom_ids({"dataset_id": "openbmi_ssvep"})
         assert len(ssvep_ids) == 10
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P5: Questionnaire → SubjectMeta
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestQuestionnaireParser:
+    """Unit tests for _parse_questionnaire."""
+
+    @skip_no_data
+    def test_parse_returns_54_subjects(self):
+        q = _parse_questionnaire(OPENBMI_ROOT / "Questionnaire_results.csv")
+        assert len(q) == 54
+
+    @skip_no_data
+    def test_age_present(self):
+        q = _parse_questionnaire(OPENBMI_ROOT / "Questionnaire_results.csv")
+        assert "age" in q[1]
+        assert isinstance(q[1]["age"], float)
+        assert 18 <= q[1]["age"] <= 60
+
+    @skip_no_data
+    def test_sex_values(self):
+        q = _parse_questionnaire(OPENBMI_ROOT / "Questionnaire_results.csv")
+        for subj_num, info in q.items():
+            if "sex" in info:
+                assert info["sex"] in ("M", "F"), f"Subject {subj_num}: bad sex={info['sex']}"
+
+    @skip_no_data
+    def test_bci_experience(self):
+        q = _parse_questionnaire(OPENBMI_ROOT / "Questionnaire_results.csv")
+        assert "bci_experience" in q[1]
+
+    def test_missing_file(self, tmp_path):
+        q = _parse_questionnaire(tmp_path / "nonexistent.csv")
+        assert q == {}
+
+
+@skip_no_data
+class TestSubjectDemographics:
+    """Verify subject demographics are stored after import_paradigm."""
+
+    @pytest.fixture
+    def pool(self, tmp_path):
+        return Pool.create(tmp_path / "pool")
+
+    @pytest.fixture
+    def task_config(self):
+        return TaskConfig({
+            "dataset_id": "openbmi_mi",
+            "dataset_name": "OpenBMI MI",
+            "task_type": "motor_imagery",
+            "class_labels": {1: "right_hand", 2: "left_hand"},
+        })
+
+    def test_subject_meta_has_age_sex(self, pool, task_config):
+        """SubjectMeta written to pool has age and sex from questionnaire."""
+        import json
+
+        imp = OpenBMIImporter(pool=pool, task_config=task_config)
+        imp.import_paradigm(
+            OPENBMI_ROOT, paradigm="MI", max_subjects=1, max_trials=3,
+        )
+
+        from neuroatom.storage import paths as P
+        meta_path = P.subject_meta_path(pool.root, "openbmi_mi", "S01")
+        assert meta_path.exists()
+        meta = json.loads(meta_path.read_text())
+        assert meta["age"] is not None
+        assert meta["sex"] in ("M", "F")
+
+    def test_custom_fields_contain_bci_experience(self, pool, task_config):
+        """Custom fields include BCI experience from questionnaire."""
+        import json
+
+        imp = OpenBMIImporter(pool=pool, task_config=task_config)
+        imp.import_paradigm(
+            OPENBMI_ROOT, paradigm="MI", max_subjects=1, max_trials=3,
+        )
+
+        from neuroatom.storage import paths as P
+        meta_path = P.subject_meta_path(pool.root, "openbmi_mi", "S01")
+        meta = json.loads(meta_path.read_text())
+        custom = meta.get("custom_fields", {})
+        assert "bci_experience" in custom

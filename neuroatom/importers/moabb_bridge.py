@@ -297,6 +297,9 @@ class MOABBBridgeImporter(BaseImporter):
                                 writer.write_atom(atom)
 
                     self._pool.register_run(run_meta)
+                    self._write_channels_json(
+                        dataset_id, subject_id, session_id, channel_infos
+                    )
 
                     result = ImportResult(
                         atoms=atoms,

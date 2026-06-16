@@ -13,6 +13,8 @@ import pytest
 from neuroatom.importers.chinese_eeg2 import (
     ChineseEEG2Importer,
     _extract_sentence_epochs,
+    _load_audio_embedding_chapter,
+    _load_text_embeddings_novel,
     _parse_run_id,
     _read_electrodes_tsv,
     _read_tsv,
@@ -21,12 +23,18 @@ from neuroatom.storage.pool import Pool
 from neuroatom.storage.signal_store import ShardManager
 from neuroatom.index.indexer import Indexer
 
-PL_ROOT = Path(r"C:\Data\ChineseEEG-2\PassiveListening")
-RA_ROOT = Path(r"C:\Data\ChineseEEG-2\ReadingAloud")
+PL_ROOT = Path(r"D:\Data\ChineseEEG-2\PassiveListening")
+RA_ROOT = Path(r"D:\Data\ChineseEEG-2\ReadingAloud")
+MATERIALS_ROOT = Path(r"D:\Data\ChineseEEG-2\materials&embeddings")
 
 SKIP_MSG = "ChineseEEG-2 data not found at expected path"
 HAS_PL = PL_ROOT.exists() and (PL_ROOT / "dataset_description.json").exists()
 HAS_RA = RA_ROOT.exists() and (RA_ROOT / "dataset_description.json").exists()
+HAS_MATERIALS = MATERIALS_ROOT.exists()
+skip_no_pl = pytest.mark.skipif(not HAS_PL, reason=SKIP_MSG)
+skip_no_materials = pytest.mark.skipif(
+    not (HAS_PL and HAS_MATERIALS), reason="ChineseEEG-2 data/materials not found"
+)
 
 
 class TestRunIdParsing:
@@ -269,13 +277,141 @@ class TestSignalCharacteristics:
         mgr.close()
         return sig
 
-    def test_units_volts(self, signal_data):
-        """Raw BrainVision data in V — values should be small."""
+    def test_units_microvolts(self, signal_data):
+        """Signals are stored in µV — typical EEG range."""
         sig = signal_data
-        assert np.abs(sig).max() < 1.0, "Signal in V should have max < 1.0"
+        max_abs = np.abs(sig).max()
+        assert max_abs < 1e6, f"Signal in µV should have max < 1e6, got {max_abs}"
+        assert max_abs > 0.01, f"Signal seems too small for µV, got {max_abs}"
 
     def test_no_nans(self, signal_data):
         assert np.isfinite(signal_data).all()
 
     def test_not_all_zero(self, signal_data):
         assert not np.allclose(signal_data, 0)
+
+
+# ======================================================================
+# P4: Text and audio embedding tests
+# ======================================================================
+
+
+@pytest.mark.skipif(not HAS_MATERIALS, reason="ChineseEEG-2 materials not found")
+class TestEmbeddingHelpers:
+    """Unit tests for embedding loader functions (no EEG import needed)."""
+
+    def test_load_text_embeddings_littleprince(self):
+        emb = _load_text_embeddings_novel(MATERIALS_ROOT, "littleprince")
+        assert emb is not None
+        assert emb.ndim == 2
+        assert emb.shape[1] == 768
+        assert emb.dtype == np.float32
+
+    def test_load_text_embeddings_garnettdream(self):
+        emb = _load_text_embeddings_novel(MATERIALS_ROOT, "garnettdream")
+        assert emb is not None
+        assert emb.shape[1] == 768
+
+    def test_load_text_embeddings_missing_novel(self):
+        emb = _load_text_embeddings_novel(MATERIALS_ROOT, "nonexistent_novel")
+        assert emb is None
+
+    def test_load_audio_embedding_chapter0(self):
+        emb = _load_audio_embedding_chapter(MATERIALS_ROOT, "littleprince", 0)
+        assert emb is not None
+        assert emb.ndim == 1
+        assert emb.shape[0] == 1024
+        assert emb.dtype == np.float32
+
+    def test_load_audio_embedding_out_of_range(self):
+        emb = _load_audio_embedding_chapter(MATERIALS_ROOT, "littleprince", 9999)
+        assert emb is None
+
+    def test_load_audio_embedding_unknown_novel(self):
+        emb = _load_audio_embedding_chapter(MATERIALS_ROOT, "unknown_novel", 0)
+        assert emb is None
+
+
+@pytest.mark.skipif(
+    not (HAS_PL and HAS_MATERIALS),
+    reason="ChineseEEG-2 PassiveListening + materials not found",
+)
+class TestEmbeddingAnnotations:
+    """Verify embedding ContinuousAnnotations are present after import."""
+
+    @pytest.fixture(scope="class")
+    def imported(self, tmp_path_factory):
+        td = tmp_path_factory.mktemp("ceeg2_emb")
+        pool = Pool.create(td / "pool")
+        imp = ChineseEEG2Importer(
+            pool, task="listening",
+            materials_root=MATERIALS_ROOT,
+        )
+        results = imp.import_dataset(
+            PL_ROOT, subjects=["01"], sessions=["littleprince"], max_runs=1,
+        )
+        return pool, results
+
+    def test_text_embedding_annotation_present(self, imported):
+        pool, results = imported
+        assert results[0].n_atoms > 0
+        atom = results[0].atoms[0]
+        ann_names = [a.name for a in atom.annotations]
+        assert "text_embedding" in ann_names, f"Got: {ann_names}"
+
+    def test_audio_embedding_annotation_present(self, imported):
+        pool, results = imported
+        atom = results[0].atoms[0]
+        ann_names = [a.name for a in atom.annotations]
+        assert "audio_embedding" in ann_names, f"Got: {ann_names}"
+
+    def test_text_embedding_shape(self, imported):
+        pool, results = imported
+        from neuroatom.core.annotation import ContinuousAnnotation
+        atom = results[0].atoms[0]
+        ann = next(
+            (a for a in atom.annotations
+             if isinstance(a, ContinuousAnnotation) and a.name == "text_embedding"),
+            None,
+        )
+        assert ann is not None
+        assert ann.data_ref.shape == (768,)
+
+    def test_audio_embedding_shape(self, imported):
+        pool, results = imported
+        from neuroatom.core.annotation import ContinuousAnnotation
+        atom = results[0].atoms[0]
+        ann = next(
+            (a for a in atom.annotations
+             if isinstance(a, ContinuousAnnotation) and a.name == "audio_embedding"),
+            None,
+        )
+        assert ann is not None
+        assert ann.data_ref.shape == (1024,)
+
+    def test_text_embedding_in_hdf5(self, imported):
+        pool, results = imported
+        import h5py
+        atom = results[0].atoms[0]
+        shard_path = pool.root / atom.signal_ref.file_path
+        with h5py.File(str(shard_path), "r") as f:
+            path = f"/atoms/{atom.atom_id}/annotations/text_embedding"
+            assert path in f, f"text_embedding missing in HDF5"
+            arr = f[path][:]
+        assert arr.shape == (768,)
+
+    def test_audio_embedding_in_hdf5(self, imported):
+        pool, results = imported
+        import h5py
+        atom = results[0].atoms[0]
+        shard_path = pool.root / atom.signal_ref.file_path
+        with h5py.File(str(shard_path), "r") as f:
+            path = f"/atoms/{atom.atom_id}/annotations/audio_embedding"
+            assert path in f, f"audio_embedding missing in HDF5"
+            arr = f[path][:]
+        assert arr.shape == (1024,)
+
+    def test_global_sentence_index_in_custom_fields(self, imported):
+        pool, results = imported
+        for atom in results[0].atoms:
+            assert "global_sentence_index" in atom.custom_fields

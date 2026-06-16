@@ -1,0 +1,80 @@
+# Task Configuration: ds-eeg-snhl Auditory Attention Detection
+# Fuglsang, S.A., Märcher-Rørsted, J., Dau, T., Hjortkjær, J. (2020)
+# "Effects of sensorineural hearing loss on cortical synchronization
+#  to competing speech during selective attention." J. Neuroscience.
+#
+# 44 subjects: 22 hearing-impaired (HI) + 22 normal-hearing (NH)
+#   - 19 subjects additionally recorded with ear-EEG (earpieces)
+# BIDS format, BDF (BioSemi ActiveTwo), 512 Hz
+# 64 scalp EEG + 8 EXG channels (EarEEG or EOG depending on subject)
+#
+# Three tasks:
+#   selectiveattention: AAD paradigm (48 trials × ~50s)
+#     - Single-talker vs two-talker conditions
+#     - Attend left vs attend right
+#     - Male vs female target speaker
+#   tonestimuli: passive ERP (1 kHz pure tones)
+#   rest: eyes-open and eyes-closed resting state
+#
+# Events (selectiveattention):
+#   targetonset: attended speech onset
+#   maskeronset: interfering speech onset (two-talker only)
+#   trialend: trial offset
+#
+# DOI: 10.5072/zenodo.463871
+# License: ODbL
+
+dataset_id: "snhl_aad"
+dataset_name: "SNHL Auditory Attention Detection (Fuglsang 2020)"
+task_type: "auditory_attention_decoding"
+original_format: "bdf"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+  # Trials delimited by targetonset → trialend events
+  anchor_events: ["targetonset"]
+  end_events: ["trialend"]
+
+event_mapping:
+  targetonset: "target_onset"
+  maskeronset: "masker_onset"
+  trialend: "trial_end"
+
+# EXG channel type depends on subject — handled by importer
+# earEEG subjects: EXG3-8 = eareeg, EXG1-2 = eog
+# non-earEEG subjects: EXG1-8 = eog/mastoid/misc
+# Status channel is trigger
+channel_type_overrides:
+  Status: "stim"
+
+exclude_channels:
+  - Status
+
+custom:
+  n_subjects: 44
+  n_hi: 22
+  n_nh: 22
+  n_eareeg_subjects: 19
+  cap: "BioSemi64"
+  sampling_rate: 512
+  paradigm: "cocktail_party"
+  tasks:
+    - "selectiveattention"
+    - "tonestimuli"
+    - "rest"
+  trial_duration_seconds: 50
+  conditions:
+    - "singletalker"
+    - "twotalker"
+  attention_labels:
+    - "attendleft"
+    - "attendright"
+  speaker_labels:
+    - "attendmale"
+    - "attendfemale"
+  has_audio_envelopes: true
+  has_eareeg: true
+  institution: "Technical University of Denmark"
+  citation: "Fuglsang et al., J. Neuroscience 2020"

@@ -91,6 +91,24 @@ class ErrorHandling(str, Enum):
     SUBSTITUTE = "substitute"
 
 
+class QualityTier(str, Enum):
+    """Data quality tier for tiered admission.
+
+    Tiers indicate how well a dataset meets NeuroAtom's standardization
+    requirements. Higher tiers guarantee more metadata completeness and
+    signal quality, making the data more readily usable.
+
+    - **SILVER**: Minimum viable — valid signal, basic annotations, ≥1 label.
+    - **GOLD**: Well-curated — full 10-20 channel names, electrode locations,
+      detailed annotations, verified sampling rate.
+    - **PLATINUM**: Publication-grade — all Gold criteria plus artifact QC,
+      provenance chain, stimulus files, multiple sessions.
+    """
+    SILVER = "silver"
+    GOLD = "gold"
+    PLATINUM = "platinum"
+
+
 class ReferenceScheme(str, Enum):
     """EEG reference scheme."""
     AVERAGE = "average"

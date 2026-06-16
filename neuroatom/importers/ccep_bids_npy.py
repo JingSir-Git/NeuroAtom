@@ -50,6 +50,7 @@ from neuroatom.importers.registry import register_importer
 from neuroatom.storage.pool import Pool
 from neuroatom.utils.channel_names import standardize_channel_name
 from neuroatom.utils.hashing import compute_atom_id
+from neuroatom.utils.unit_convert import convert_to_storage_unit
 from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
@@ -682,16 +683,25 @@ class CCEPImporter(BaseImporter):
                         custom_fields=atom_custom,
                     )
 
+                    # Convert to pool storage unit (V → µV)
+                    signal_conv, storage_unit, orig_unit = convert_to_storage_unit(
+                        signal.astype(np.float32), source_unit="V",
+                        pool_config=self.pool.config,
+                    )
+                    atom.signal_unit = storage_unit
+                    atom.original_unit = orig_unit
+
                     # Validate signal
                     warnings = validate_signal(
-                        signal=signal.astype(np.float32),
+                        signal=signal_conv,
                         atom_id=atom_id,
                         config=self.pool.config.get("import", {}),
+                        signal_unit=storage_unit,
                     )
                     all_warnings.extend(warnings)
 
                     # Write signal to HDF5
-                    signal_ref = shard_mgr.write_atom_signal(atom_id, signal)
+                    signal_ref = shard_mgr.write_atom_signal(atom_id, signal_conv)
                     atom.signal_ref = signal_ref
 
                     # Write JSONL
@@ -781,6 +791,9 @@ class CCEPImporter(BaseImporter):
                     n_trials=len(eeg_atoms),
                 )
                 self.pool.register_run(run_meta_eeg)
+                self._write_channels_json(
+                    dataset_id, subject_id, session_id, eeg_ch_infos
+                )
                 results.append(ImportResult(
                     atoms=eeg_atoms,
                     run_meta=run_meta_eeg,
@@ -804,6 +817,9 @@ class CCEPImporter(BaseImporter):
                     n_trials=len(ieeg_atoms),
                 )
                 self.pool.register_run(run_meta_ieeg)
+                self._write_channels_json(
+                    dataset_id, subject_id, session_id, ieeg_ch_infos
+                )
                 results.append(ImportResult(
                     atoms=ieeg_atoms,
                     run_meta=run_meta_ieeg,

@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
+from neuroatom.core.enums import QualityTier
+
 
 class DatasetMeta(BaseModel):
     """Top-level metadata for an imported dataset.
@@ -60,6 +62,15 @@ class DatasetMeta(BaseModel):
     import_config_ref: Optional[str] = Field(
         default=None,
         description="Path to the task config YAML file used for import.",
+    )
+    quality_tier: Optional[QualityTier] = Field(
+        default=None,
+        description=(
+            "Data quality tier (silver/gold/platinum). "
+            "Determined at import time based on metadata completeness, "
+            "signal quality, and annotation richness. "
+            "None means not yet assessed."
+        ),
     )
     custom_fields: Dict[str, Any] = Field(
         default_factory=dict,

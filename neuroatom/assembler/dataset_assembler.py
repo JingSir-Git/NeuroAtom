@@ -176,6 +176,8 @@ class DatasetAssembler:
     def __init__(self, pool: Pool, indexer: Indexer):
         self._pool = pool
         self._indexer = indexer
+        # Cache: (dataset_id, subject_id, session_id) → {ch_id: standard_name}
+        self._ch_name_cache: Dict[Tuple[str, str, str], Dict[str, str]] = {}
 
     def assemble(
         self,
@@ -420,9 +422,8 @@ class DatasetAssembler:
         # Load signal
         signal = ShardManager.static_read(self._pool.root, atom.signal_ref)
 
-        # Unit standardize
-        # Determine source unit (from channel info or default V)
-        source_unit = "V"  # MNE default
+        # Unit standardize — read the declared unit from atom metadata
+        source_unit = getattr(atom, "signal_unit", "V")
         signal = unit_std.convert(signal, source_unit, recipe.error_handling.value)
 
         # Re-reference
@@ -438,21 +439,32 @@ class DatasetAssembler:
 
         # Channel map
         if ch_mapper:
-            # Build standard_name → index map
-            # For now, use channel_ids as standard names (proper mapping via session metadata)
-            source_map = {ch_id: idx for idx, ch_id in enumerate(atom.channel_ids)}
+            # Build standard_name → index map using channels.json
+            ch_id_to_std = self._get_channel_name_map(
+                atom.dataset_id, atom.subject_id, atom.session_id
+            )
+            source_map: Dict[str, int] = {}
+            for idx, ch_id in enumerate(atom.channel_ids):
+                std_name = ch_id_to_std.get(ch_id)
+                if std_name:
+                    source_map[std_name] = idx
+                else:
+                    # Fallback: use channel_id itself (might already be a standard name)
+                    source_map[ch_id] = idx
             mapped, _ = ch_mapper.apply(signal, source_map)
             if mapped is None:
                 return None
             signal = mapped
 
-        # Filter (before resample for proper cutoff)
-        if sig_filter:
-            signal = sig_filter.apply(signal)
-
-        # Resample
+        # Resample first — resample_poly includes anti-aliasing.
+        # This ensures a uniform sampling rate before bandpass filtering,
+        # which is critical for cross-dataset assembly (heterogeneous srates).
         if resampler:
             signal = resampler.apply(signal, atom.sampling_rate)
+
+        # Filter (after resample — all atoms now at target rate)
+        if sig_filter:
+            signal = sig_filter.apply(signal)
 
         return signal
 
@@ -482,6 +494,36 @@ class DatasetAssembler:
     # ------------------------------------------------------------------
     # Internal: helpers
     # ------------------------------------------------------------------
+
+    def _get_channel_name_map(
+        self, dataset_id: str, subject_id: str, session_id: str,
+    ) -> Dict[str, str]:
+        """Return {channel_id: standard_name} from channels.json, with caching."""
+        key = (dataset_id, subject_id, session_id)
+        if key in self._ch_name_cache:
+            return self._ch_name_cache[key]
+
+        from neuroatom.storage import paths as P
+        import json
+
+        ch_file = P.channels_path(
+            self._pool.root, dataset_id, subject_id, session_id
+        )
+        mapping: Dict[str, str] = {}
+        if ch_file.exists():
+            try:
+                with open(ch_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for ch in data:
+                    ch_id = ch.get("channel_id")
+                    std_name = ch.get("standard_name")
+                    if ch_id and std_name:
+                        mapping[ch_id] = std_name
+            except Exception as e:
+                logger.warning("Could not load channel map from %s: %s", ch_file, e)
+
+        self._ch_name_cache[key] = mapping
+        return mapping
 
     def _load_atoms_by_ids(self, atom_ids: List[str]) -> List[Atom]:
         """Load full Atom objects from JSONL files by their IDs."""

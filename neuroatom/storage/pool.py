@@ -109,6 +109,7 @@ class Pool:
         ds_dir.mkdir(parents=True, exist_ok=True)
         write_json(meta, P.dataset_meta_path(self._root, meta.dataset_id))
         logger.info("Registered dataset: %s", meta.dataset_id)
+        self._update_catalog(meta.dataset_id)
 
     def get_dataset_meta(self, dataset_id: str) -> DatasetMeta:
         """Load dataset metadata."""
@@ -132,6 +133,11 @@ class Pool:
         if ds_dir.exists():
             shutil.rmtree(ds_dir)
             logger.info("Deleted dataset: %s", dataset_id)
+            try:
+                from neuroatom.catalog.local import remove_catalog_entry
+                remove_catalog_entry(self, dataset_id)
+            except Exception:
+                pass
         else:
             logger.warning("Dataset not found for deletion: %s", dataset_id)
 
@@ -297,6 +303,97 @@ class Pool:
         lock_path = P.dataset_lock_path(self._root, dataset_id)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         return FileLock(str(lock_path), timeout=300)
+
+    # ------------------------------------------------------------------
+    # Pool export / import
+    # ------------------------------------------------------------------
+
+    def export(
+        self,
+        output_path: Path,
+        dataset_ids: Optional[List[str]] = None,
+        subject_ids: Optional[List[str]] = None,
+        since: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Dict:
+        """Export this pool (or a subset) as a `.napool` archive.
+
+        Args:
+            output_path: Destination path for the archive file.
+            dataset_ids: Export only these datasets (None = all).
+            subject_ids: Export only these subjects. Accepts bare IDs
+                like ``"S01"`` or qualified ``"dataset_id/S01"``.
+            since: Only include datasets imported after this ISO date.
+            description: Human-readable archive description.
+
+        Returns:
+            The manifest dictionary.
+        """
+        from neuroatom.storage.pool_archive import export_pool
+        return export_pool(
+            self._root, output_path,
+            dataset_ids=dataset_ids,
+            subject_ids=subject_ids,
+            since=since,
+            description=description,
+        )
+
+    @classmethod
+    def import_from(
+        cls,
+        archive_path: Path,
+        target_root: Path,
+        verify: bool = True,
+        merge: bool = True,
+    ) -> "Pool":
+        """Import a `.napool` archive into a pool directory.
+
+        If target_root is an existing pool, datasets are merged in.
+        If target_root is empty/new, a fresh pool is created from the archive.
+
+        Args:
+            archive_path: Path to the `.napool` file.
+            target_root: Target pool directory.
+            verify: Verify SHA-256 checksums after extraction.
+            merge: If True, merge into existing pool.
+
+        Returns:
+            A Pool instance pointing to the target.
+        """
+        from neuroatom.storage.pool_archive import import_pool
+        import_pool(archive_path, target_root, verify=verify, merge=merge)
+        return cls(target_root)
+
+    # ------------------------------------------------------------------
+    # Catalog integration
+    # ------------------------------------------------------------------
+
+    def _update_catalog(self, dataset_id: str) -> None:
+        """Best-effort catalog update after dataset registration."""
+        try:
+            from neuroatom.catalog.local import update_catalog_entry
+            update_catalog_entry(self, dataset_id)
+        except Exception:
+            pass  # catalog is optional; never block imports
+
+    def assess_quality(self, dataset_id: str) -> Optional[str]:
+        """Run the quality gate on a dataset and update its metadata.
+
+        Returns the quality tier name or None.
+        """
+        from neuroatom.quality.gate import QualityGate
+        gate = QualityGate(self)
+        report = gate.assess_dataset(dataset_id)
+        if report.tier:
+            try:
+                meta = self.get_dataset_meta(dataset_id)
+                meta.quality_tier = report.tier
+                write_json(meta, P.dataset_meta_path(self._root, dataset_id))
+                self._update_catalog(dataset_id)
+            except Exception:
+                pass
+            return report.tier.value
+        return None
 
     # ------------------------------------------------------------------
     # Config helpers

@@ -1,0 +1,51 @@
+# ChineseEEG Reading task config
+# Dataset: ChineseEEG (Mou et al., 2024) — doi:10.18112/openneuro.ds004952
+# Paradigm: Visual reading of Chinese novels (line-by-line presentation)
+# Format: BIDS BrainVision (.vhdr), 128ch EGI HydroCel-128 @ 1000Hz
+# Events: ROWS (sentence start), ROWE (sentence end), CHxx (chapter marker),
+#         PRES/PREE (preface start/end), CALS/CALE (calibration), EYES/EYEE (eye)
+# Atomization: Sentence-level epochs from ROWS→ROWE pairs
+# Novels: The Little Prince (ses-LittlePrince, 7 runs),
+#         Erta's Dream of Garnett (ses-GarnettDream, 18 runs)
+# Subjects: 10 (sub-04..sub-15, with gaps)
+# Reference: Mou, X. et al. ChineseEEG: A Chinese Linguistic Corpora EEG Dataset
+#   for Semantic Alignment and Neural Decoding. Sci Data 11, 550 (2024).
+
+dataset_id: chinese_eeg_reading
+dataset_name: "ChineseEEG Reading"
+task_type: language_comprehension
+
+# Signal metadata
+signal_unit: V  # channels.tsv says V; BrainVision 0.1 µV resolution
+sampling_rate: 1000.0
+n_channels: 128
+
+# Channel mapping
+channel_system: EGI_HydroCel_128
+exclude_channels: []  # All 128 channels are EEG
+
+# Atomization: sentence-level
+atomizer_type: sentence_epoch
+sentence_events:
+  start_marker: "ROWS"     # trial_type in events.tsv for sentence/row start
+  end_marker: "ROWE"       # trial_type in events.tsv for sentence/row end
+  chapter_marker_prefix: "CH"  # CHxx markers denote chapter onset
+
+# Trial definition for windowed fallback
+trial_definition:
+  event_windows: {}
+  default_tmin: 0.0
+  default_tmax: 10.0  # max sentence duration safety net
+
+# Metadata
+paradigm: visual_reading
+novels:
+  - LittlePrince
+  - GarnettDream
+
+# Known missing data
+missing_data:
+  - "sub-09 ses-LittlePrince run-01 through run-03"
+  - "sub-14 ses-GarnettDream run-09"
+  - "sub-15 ses-GarnettDream run-12"
+  - "sub-07 ses-GarnettDream run-18 (substituted by run-19)"

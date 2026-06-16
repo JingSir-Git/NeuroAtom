@@ -115,6 +115,21 @@ emotion_order:
   session_2: [2, 1, 3, 0, 4, 4, 0, 3, 2, 1, 3, 4, 1, 2, 0]
   session_3: [2, 1, 3, 0, 4, 4, 0, 3, 2, 1, 3, 4, 1, 2, 0]
 
+# Video clip IDs per session (from emotion_label_and_stimuli_order.xlsx)
+# Each session presents 15 clips in a specific order, 3 clips per emotion.
+# Clip ID format: "{emotion_label}_{clip_index}" (e.g. "happy_1")
+# Source: official SEED-V stimuli_order protocol document
+video_clips:
+  session_1: ["happy_1", "fear_1", "neutral_1", "sad_1", "disgust_1",
+              "happy_2", "fear_2", "neutral_2", "sad_2", "disgust_2",
+              "happy_3", "fear_3", "neutral_3", "sad_3", "disgust_3"]
+  session_2: ["sad_1", "fear_1", "neutral_1", "disgust_1", "happy_1",
+              "happy_2", "disgust_2", "neutral_2", "sad_2", "fear_2",
+              "neutral_3", "happy_3", "fear_3", "sad_3", "disgust_3"]
+  session_3: ["sad_1", "fear_1", "neutral_1", "disgust_1", "happy_1",
+              "happy_2", "disgust_2", "neutral_2", "sad_2", "fear_2",
+              "neutral_3", "happy_3", "fear_3", "sad_3", "disgust_3"]
+
 # Trial timestamps (seconds) from trial_start_end_timestamp.txt
 trial_timestamps:
   session_1:

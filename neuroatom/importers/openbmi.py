@@ -34,6 +34,7 @@ Directory layout:
     └── Artifact/  (not imported)
 """
 
+import csv
 import logging
 import re
 from pathlib import Path
@@ -45,6 +46,7 @@ import scipy.io as sio
 from neuroatom.core.annotation import CategoricalAnnotation, NumericAnnotation
 from neuroatom.core.atom import Atom, TemporalInfo
 from neuroatom.core.channel import ChannelInfo
+from neuroatom.core.electrode import ElectrodeLocation
 from neuroatom.core.enums import (
     AtomType,
     ChannelStatus,
@@ -55,14 +57,41 @@ from neuroatom.core.provenance import ProcessingHistory, ProcessingStep
 from neuroatom.core.quality import QualityInfo
 from neuroatom.core.run import RunMeta
 from neuroatom.core.signal_ref import SignalRef
+from neuroatom.core.subject import SubjectMeta
 from neuroatom.importers.base import BaseImporter, ImportResult, TaskConfig
 from neuroatom.importers.registry import register_importer
 from neuroatom.storage.pool import Pool
 from neuroatom.utils.channel_names import standardize_channel_name
 from neuroatom.utils.hashing import compute_atom_id
+from neuroatom.utils.unit_convert import convert_to_storage_unit
 from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
+
+# ── Standard montage for electrode coordinates ─────────────────────────
+_STD_1005_POS: Optional[Dict[str, Tuple[float, float, float]]] = None
+
+
+def _get_standard_1005_positions() -> Dict[str, Tuple[float, float, float]]:
+    """Lazy-load standard 10-05 electrode positions from MNE.
+
+    Returns dict mapping channel name → (x, y, z) in MNI head coords (metres).
+    """
+    global _STD_1005_POS
+    if _STD_1005_POS is None:
+        try:
+            import mne
+            montage = mne.channels.make_standard_montage("standard_1005")
+            ch_pos = montage.get_positions()["ch_pos"]
+            _STD_1005_POS = {
+                name: (float(pos[0]), float(pos[1]), float(pos[2]))
+                for name, pos in ch_pos.items()
+            }
+        except Exception:
+            logger.debug("Could not load standard_1005 montage from MNE.")
+            _STD_1005_POS = {}
+    return _STD_1005_POS
+
 
 # Paradigm key → .mat variable name prefixes
 _PARADIGM_KEYS = {
@@ -76,6 +105,82 @@ _FILENAME_RE = re.compile(
     r"sess(\d{2})_subj(\d{2})_EEG_(MI|ERP|SSVEP)\.mat",
     re.IGNORECASE,
 )
+
+
+def _parse_questionnaire(csv_path: Path) -> Dict[int, Dict[str, Any]]:
+    """Parse OpenBMI Questionnaire_results.csv into per-subject demographics.
+
+    The CSV is transposed: rows are questionnaire items, columns are subjects.
+    Returns ``{subject_num: {age, sex, bci_experience, ...}}``.
+    """
+    if not csv_path.exists():
+        return {}
+
+    result: Dict[int, Dict[str, Any]] = {}
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+    except Exception as e:
+        logger.warning("Failed to read questionnaire: %s", e)
+        return {}
+
+    # Discover subject columns
+    sub_cols = [c for c in rows[0].keys() if c.startswith("subject")]
+    for col in sub_cols:
+        m = re.match(r"subject(\d+)", col)
+        if not m:
+            continue
+        subj_num = int(m.group(1))
+        info: Dict[str, Any] = {}
+
+        for row in rows:
+            q = row.get("Questionaire", "").strip()
+            val = row.get(col, "").strip()
+            if not q or not val:
+                continue
+
+            q_lower = q.lower()
+            if "age" in q_lower and "number" in q_lower:
+                try:
+                    info["age"] = float(val)
+                except ValueError:
+                    pass
+            elif "sex" in q_lower:
+                # 0=male, 1=female
+                info["sex"] = "F" if val == "1" else "M"
+            elif "bci experience" in q_lower:
+                try:
+                    info["bci_experience"] = int(float(val))
+                except ValueError:
+                    pass
+            elif "how long did you sleep" in q_lower:
+                try:
+                    info["sleep_level"] = int(val)
+                except ValueError:
+                    pass
+            elif "drink coffee" in q_lower:
+                try:
+                    info["coffee_hours_before"] = float(val)
+                except ValueError:
+                    pass
+            elif "drink alcohol" in q_lower:
+                try:
+                    info["alcohol_hours_before"] = float(val)
+                except ValueError:
+                    pass
+            elif "smoke" in q_lower:
+                try:
+                    info["smoke_hours_before"] = float(val)
+                except ValueError:
+                    pass
+            elif "time slot" in q_lower:
+                slot_map = {"1": "09:00", "2": "12:00", "3": "15:00", "4": "18:00"}
+                info["time_slot"] = slot_map.get(val, val)
+
+        result[subj_num] = info
+
+    return result
 
 
 def _detect_openbmi(path: Path) -> bool:
@@ -190,6 +295,21 @@ class OpenBMIImporter(BaseImporter):
                 else None
             )
 
+            # Look up electrode coordinates from standard 10-05 montage
+            location = None
+            if ch_type == ChannelType.EEG:
+                std_pos = _get_standard_1005_positions()
+                # Try exact name, then case-insensitive lookup
+                for try_name in [ch_name, std_name or ""]:
+                    if try_name in std_pos:
+                        x, y, z = std_pos[try_name]
+                        location = ElectrodeLocation(
+                            x=x, y=y, z=z,
+                            coordinate_system="MNI",
+                            coordinate_units="m",
+                        )
+                        break
+
             ch_infos.append(ChannelInfo(
                 channel_id=f"ch_{idx:03d}",
                 index=idx,
@@ -198,7 +318,13 @@ class OpenBMIImporter(BaseImporter):
                 type=ch_type,
                 unit=unit,
                 sampling_rate=srate,
+                location=location,
+                reference="FCz",
                 status=ChannelStatus.GOOD,
+                custom_fields=(
+                    {"coordinate_source": "standard_1005_montage"}
+                    if location is not None else {}
+                ),
             ))
 
         return ch_infos
@@ -236,16 +362,23 @@ class OpenBMIImporter(BaseImporter):
         from neuroatom.storage import paths as P
 
         # ── Parse struct fields ──────────────────────────────────────────
+        from neuroatom.utils.validation import validate_sampling_rate
         smt = struct["smt"]       # (epoch_samples, n_trials, n_channels)
         fs = int(struct["fs"].ravel()[0])
+        validate_sampling_rate(float(fs), f"OpenBMI {paradigm} {split_name}")
         y_dec = struct["y_dec"].ravel().astype(int)
         n_epoch_samples, n_trials, n_channels = smt.shape
 
-        # Channel names from .mat
-        chan_names = [
-            str(struct["chan"][0, i][0])
-            for i in range(struct["chan"].shape[1])
-        ]
+        # Channel names from .mat — handle both (1, N) and (N,) shapes
+        chan_raw = struct["chan"]
+        if chan_raw.ndim == 2:
+            chan_names = [
+                str(chan_raw[0, i][0]) for i in range(chan_raw.shape[1])
+            ]
+        elif chan_raw.ndim == 1:
+            chan_names = [str(chan_raw[i]) for i in range(chan_raw.shape[0])]
+        else:
+            chan_names = [str(chan_raw.flat[i]) for i in range(chan_raw.size)]
 
         # Trial onsets in continuous recording (if available)
         t_onsets = struct["t"].ravel().astype(int) if "t" in struct.dtype.names else None
@@ -422,16 +555,25 @@ class OpenBMIImporter(BaseImporter):
                         },
                     )
 
+                    # Convert to pool storage unit (µV → µV, identity)
+                    epoch_conv, storage_unit, orig_unit = convert_to_storage_unit(
+                        epoch.astype(np.float32), source_unit="uV",
+                        pool_config=self.pool.config,
+                    )
+                    atom.signal_unit = storage_unit
+                    atom.original_unit = orig_unit
+
                     # Validate signal
                     warnings = validate_signal(
-                        signal=epoch.astype(np.float32),
+                        signal=epoch_conv,
                         atom_id=atom_id,
                         config=self.pool.config.get("import", {}),
+                        signal_unit=storage_unit,
                     )
                     all_warnings.extend(warnings)
 
                     # Write signal to HDF5
-                    signal_ref = shard_mgr.write_atom_signal(atom_id, epoch)
+                    signal_ref = shard_mgr.write_atom_signal(atom_id, epoch_conv)
                     atom.signal_ref = signal_ref
 
                     # Write metadata
@@ -483,6 +625,8 @@ class OpenBMIImporter(BaseImporter):
             paradigm, mat_path.name, subject_id, session_id,
         )
 
+        from neuroatom.utils.mat_compat import require_mat_v5
+        require_mat_v5(mat_path, "OpenBMIImporter")
         mat = sio.loadmat(str(mat_path))
 
         train_key, test_key = _PARADIGM_KEYS[paradigm]
@@ -549,6 +693,9 @@ class OpenBMIImporter(BaseImporter):
                 },
             )
             self.pool.register_run(run_meta)
+            self._write_channels_json(
+                dataset_id, subject_id, session_id, ch_infos
+            )
 
             results.append(ImportResult(
                 atoms=atoms,
@@ -635,6 +782,34 @@ class OpenBMIImporter(BaseImporter):
             "OpenBMI %s: found %d files (%d subjects) in %s",
             paradigm, len(filtered_files), len(subjects_seen), paradigm_dir,
         )
+
+        # ── Load questionnaire for subject demographics ──
+        questionnaire = _parse_questionnaire(data_dir / "Questionnaire_results.csv")
+        if questionnaire:
+            logger.info(
+                "Loaded questionnaire data for %d subjects", len(questionnaire),
+            )
+
+        # Register subjects with demographics before importing
+        dataset_id = self.task_config.dataset_id
+        registered_subjects: set = set()
+        for subj_num in sorted(subjects_seen):
+            subject_id = f"S{subj_num:02d}"
+            if subject_id in registered_subjects:
+                continue
+            registered_subjects.add(subject_id)
+
+            q_info = dict(questionnaire.get(subj_num, {}))
+            age = q_info.pop("age", None)
+            sex = q_info.pop("sex", None)
+
+            self.pool.register_subject(SubjectMeta(
+                subject_id=subject_id,
+                dataset_id=dataset_id,
+                age=age,
+                sex=sex,
+                custom_fields=q_info if q_info else {},
+            ))
 
         all_results = []
         for mat_file in filtered_files:

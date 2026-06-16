@@ -46,6 +46,7 @@ from neuroatom.importers.registry import register_importer
 from neuroatom.storage.pool import Pool
 from neuroatom.utils.channel_names import standardize_channel_name
 from neuroatom.utils.hashing import compute_atom_id
+from neuroatom.utils.unit_convert import convert_to_storage_unit
 from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
@@ -319,10 +320,17 @@ class PhysioNetMIImporter(BaseImporter):
                 subject_id, run_num, baseline_type,
                 len(channel_ids), n_samples, n_samples / srate,
             )
+            data_f32, storage_unit, orig_unit = convert_to_storage_unit(
+                data.astype(np.float32), source_unit="V",
+                pool_config=self.pool.config,
+            )
+            atom.signal_unit = storage_unit
+            atom.original_unit = orig_unit
             warnings = validate_signal(
-                signal=data.astype(np.float32),
+                signal=data_f32,
                 atom_id=atom_id,
                 config=self.pool.config.get("import", {}),
+                signal_unit=storage_unit,
             )
             return [atom], ch_infos, warnings
 
@@ -496,16 +504,25 @@ class PhysioNetMIImporter(BaseImporter):
                         },
                     )
 
+                    # Convert to pool storage unit (V → µV)
+                    signal_conv, storage_unit, orig_unit = convert_to_storage_unit(
+                        signal.astype(np.float32), source_unit="V",
+                        pool_config=self.pool.config,
+                    )
+                    atom.signal_unit = storage_unit
+                    atom.original_unit = orig_unit
+
                     # Validate
                     warnings = validate_signal(
-                        signal=signal.astype(np.float32),
+                        signal=signal_conv,
                         atom_id=atom_id,
                         config=self.pool.config.get("import", {}),
+                        signal_unit=storage_unit,
                     )
                     all_warnings.extend(warnings)
 
                     # Write signal
-                    signal_ref = shard_mgr.write_atom_signal(atom_id, signal)
+                    signal_ref = shard_mgr.write_atom_signal(atom_id, signal_conv)
                     atom.signal_ref = signal_ref
 
                     writer.write_atom(atom)
@@ -609,6 +626,9 @@ class PhysioNetMIImporter(BaseImporter):
                     n_atoms=len(atoms),
                 )
                 self.pool.register_run(run_meta)
+                self._write_channels_json(
+                    dataset_id, subject_id, session_id, ch_infos
+                )
                 results.append(ImportResult(
                     atoms=atoms,
                     run_meta=run_meta,

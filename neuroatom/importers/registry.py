@@ -34,6 +34,7 @@ def _ensure_all_registered() -> None:
         "neuroatom.importers.seed_v",
         "neuroatom.importers.zuco2",
         "neuroatom.importers.ccep_bids_npy",
+        "neuroatom.importers.chinese_eeg",
         "neuroatom.importers.chinese_eeg2",
         "neuroatom.importers.openbmi",
         "neuroatom.importers.aad_mat",
@@ -42,6 +43,10 @@ def _ensure_all_registered() -> None:
         "neuroatom.importers.mat",
         "neuroatom.importers.mne_generic",
         "neuroatom.importers.moabb_bridge",
+        "neuroatom.importers.generic",
+        "neuroatom.importers.snhl_aad",
+        "neuroatom.importers.zuco1",
+        "neuroatom.importers.eeg_ieeg_wm",
     ]
     for mod in _modules:
         try:
@@ -51,18 +56,30 @@ def _ensure_all_registered() -> None:
     _ALL_LOADED = True
 
 
+_FORMAT_ALIASES: Dict[str, str] = {
+    "kul_aad": "aad_mat",
+    "dtu_aad": "aad_mat",
+    "snhl_aad": "snhl_aad",
+    "zuco1_sr": "zuco1",
+    "zuco1_nr": "zuco1",
+    "zuco1_tsr": "zuco1",
+    "eeg_ieeg_wm": "eeg_ieeg_wm",
+}
+
+
 def get_importer_class(format_name: str) -> Type[BaseImporter]:
     """Return the importer **class** by format name (no instantiation).
 
     Ensures all built-in importers are loaded first.
     """
     _ensure_all_registered()
-    if format_name not in _REGISTRY:
+    resolved = _FORMAT_ALIASES.get(format_name, format_name)
+    if resolved not in _REGISTRY:
         raise ValueError(
             f"Unknown format '{format_name}'. "
             f"Registered formats: {list(_REGISTRY.keys())}"
         )
-    return _REGISTRY[format_name]
+    return _REGISTRY[resolved]
 
 
 def get_importer(

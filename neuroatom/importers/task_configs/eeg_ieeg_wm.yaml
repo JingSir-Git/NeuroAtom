@@ -1,0 +1,79 @@
+# Task Configuration: EEG-iEEG Verbal Working Memory Dataset
+# Dimakopoulos, V., Mégevand, P., Stieglitz, L.H., Imbach, L.,
+# Sarnthein, J. (2022). "Information flows from hippocampus to auditory
+# cortex during replay of verbal working memory items." eLife.
+#
+# 15 epilepsy patients with simultaneous scalp EEG + iEEG
+# BIDS format, EDF
+#
+# Scalp EEG: 19 channels (10-20 system) @ 200 Hz
+# iEEG: 32-80 channels @ 2000 Hz
+#   - sub-01 to sub-09: SEEG only
+#   - sub-10 to sub-13: SEEG + ECoG (grid electrodes)
+#   - sub-14, sub-15: SEEG only
+#
+# Task: Modified Sternberg verbal working memory
+#   - Encoding: memorize 4/6/8 consonants (2 s)
+#   - Maintenance: 3 s delay
+#   - Recall: probe letter, match/mismatch response
+#
+# Events (events.tsv):
+#   onset, duration, nTrial, begSample, endSample,
+#   SetSize, ProbeLetter, Match, Correct, ResponseTime, Artifact
+#
+# Each session has ~50 trials, 8 s per trial.
+# Multiple sessions per subject (2-8 sessions).
+#
+# MNI coordinates and anatomical labels available for iEEG electrodes.
+#
+# DOI: 10.18112/openneuro.ds004752.v1.0.1
+# License: CC0
+
+dataset_id: "eeg_ieeg_wm"
+dataset_name: "EEG-iEEG Verbal Working Memory"
+task_type: "working_memory"
+original_format: "edf"
+
+signal_unit: "uV"
+
+# Trial definition: 8-second epochs from events.tsv
+trial_definition:
+  mode: "trial"
+  trial_duration_seconds: 8.0
+
+# Events from events.tsv columns
+event_mapping:
+  Match_IN: "match"
+  Match_OUT: "mismatch"
+
+# Channel type overrides for scalp EEG
+channel_type_overrides: {}
+
+exclude_channels: []
+
+custom:
+  n_subjects: 15
+  eeg_sampling_rate: 200
+  ieeg_sampling_rate: 2000
+  eeg_channels: 19
+  eeg_system: "10-20"
+  modalities:
+    - eeg
+    - ieeg
+  ieeg_types:
+    - seeg
+    - ecog
+  subjects_with_ecog:
+    - "sub-10"
+    - "sub-11"
+    - "sub-12"
+    - "sub-13"
+  set_sizes: [4, 6, 8]
+  trial_phases:
+    encoding: 2.0     # seconds
+    maintenance: 3.0   # seconds
+    recall: 3.0        # seconds (probe + response)
+  has_mni_coordinates: true
+  has_anatomical_labels: true
+  institution: "Schweizerische Epilepsie-Klinik, Zurich"
+  citation: "Dimakopoulos et al., eLife 2022"

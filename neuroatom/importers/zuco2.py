@@ -31,7 +31,7 @@ import h5py
 import numpy as np
 import scipy.io as sio
 
-from neuroatom.core.annotation import CategoricalAnnotation, NumericAnnotation
+from neuroatom.core.annotation import CategoricalAnnotation, NumericAnnotation, TextAnnotation
 from neuroatom.core.atom import Atom, TemporalInfo
 from neuroatom.core.channel import ChannelInfo
 from neuroatom.core.electrode import ElectrodeLocation
@@ -41,9 +41,19 @@ from neuroatom.core.quality import QualityInfo
 from neuroatom.core.signal_ref import SignalRef
 from neuroatom.importers.base import BaseImporter, ImportResult, TaskConfig
 from neuroatom.importers.registry import register_importer
+from neuroatom.importers.zuco_features import (
+    build_et_annotations,
+    build_word_annotations,
+    find_et_file,
+    find_results_file,
+    load_corrected_et_v5,
+    load_zuco_results_v5,
+    segment_et_by_sentences,
+)
 from neuroatom.storage.pool import Pool
 from neuroatom.utils.channel_names import standardize_channel_name
 from neuroatom.utils.hashing import compute_atom_id
+from neuroatom.utils.unit_convert import convert_to_storage_unit
 from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
@@ -168,7 +178,13 @@ def _sentence_epochs(
             end = onsets[i + 1]
         else:
             end = total_samples
-        epochs.append((onset, end))
+        if end > onset:
+            epochs.append((onset, end))
+        else:
+            logger.warning(
+                "Skipping zero/negative-length epoch at onset=%d (end=%d)",
+                onset, end,
+            )
     return epochs
 
 
@@ -305,8 +321,15 @@ class Zuco2Importer(BaseImporter):
         dataset_id: str,
         subject_id: str,
         max_sentences: Optional[int] = None,
+        results_sentences: Optional[List[Dict[str, Any]]] = None,
+        results_offset: int = 0,
     ) -> Tuple[List[Atom], List[ChannelInfo], List[str]]:
         """Import sentence-level epochs from one text's EEG file.
+
+        If *results_sentences* is provided (from the results .mat file),
+        each atom is enriched with word-level reading features and
+        eye-tracking annotations. If a corrected ET file is found,
+        raw gaze and pupil time series are stored as companion data.
 
         Returns:
             (atoms, channel_infos, warnings)
@@ -322,11 +345,34 @@ class Zuco2Importer(BaseImporter):
         prep_dir = mat_path.parent.parent  # Preprocessed/ dir
         wordbounds = _load_wordbounds(prep_dir, text_id)
 
+        # ── Load corrected eye-tracking file (best-effort) ──
+        et_segments: List[Optional[Dict[str, np.ndarray]]] = []
+        et_srate = 500.0
+        et_path = find_et_file(prep_dir, subject_id, text_id)
+        if et_path is not None:
+            et_data = load_corrected_et_v5(et_path)
+            if et_data is not None:
+                et_segments = segment_et_by_sentences(et_data)
+                ts = et_data["data"][:, 0]
+                if len(ts) > 1:
+                    median_dt = np.median(np.diff(ts))
+                    if median_dt > 0:
+                        et_srate = 1000.0 / median_dt
+                logger.info(
+                    "Loaded ET for %s/%s: %d segments @ ~%.0f Hz",
+                    subject_id, text_id, len(et_segments), et_srate,
+                )
+
+        from neuroatom.utils.mat_compat import require_mat_v73
+        require_mat_v73(mat_path, "Zuco2Importer")
+
         with h5py.File(str(mat_path), "r") as f:
             eeg = f["EEG"]
 
             # Basic info
             srate = float(eeg["srate"][()].flat[0])
+            from neuroatom.utils.validation import validate_sampling_rate
+            validate_sampling_rate(srate, f"Zuco2 {text_id}")
             data_ds = eeg["data"]
             total_samples, n_channels = data_ds.shape
 
@@ -452,6 +498,67 @@ class Zuco2Importer(BaseImporter):
                             except Exception:
                                 pass
 
+                        # Automagic quality scores as annotations
+                        if automagic_info.get("selected_qc") is not None:
+                            annotations.append(NumericAnnotation(
+                                annotation_id=f"ann_qc_{run_id}_{sent_idx:04d}",
+                                name="quality_score",
+                                numeric_value=automagic_info["selected_qc"],
+                                domain="quality",
+                                custom_fields={
+                                    "source": "automagic",
+                                },
+                            ))
+                        if automagic_info.get("automagic_rate"):
+                            annotations.append(CategoricalAnnotation(
+                                annotation_id=f"ann_qcrate_{run_id}_{sent_idx:04d}",
+                                name="quality_rating",
+                                value=automagic_info["automagic_rate"],
+                                domain="quality",
+                                custom_fields={
+                                    "source": "automagic",
+                                },
+                            ))
+
+                        # Reference type
+                        if ref_type:
+                            annotations.append(CategoricalAnnotation(
+                                annotation_id=f"ann_ref_{run_id}_{sent_idx:04d}",
+                                name="reference_type",
+                                value=ref_type,
+                                domain="physiological",
+                                custom_fields={
+                                    "source": "dataset_file",
+                                },
+                            ))
+
+                        # ── Word-level features from results file ──
+                        ann_arrays: Dict[str, np.ndarray] = {}
+                        res_idx = results_offset + sent_idx
+                        if (
+                            results_sentences is not None
+                            and res_idx < len(results_sentences)
+                        ):
+                            word_anns, word_arrays = build_word_annotations(
+                                results_sentences[res_idx],
+                                run_id, sent_idx, srate,
+                            )
+                            annotations.extend(word_anns)
+                            ann_arrays.update(word_arrays)
+
+                        # ── Raw eye-tracking time series ──
+                        et_seg = (
+                            et_segments[sent_idx]
+                            if sent_idx < len(et_segments)
+                            else None
+                        )
+                        if et_seg is not None:
+                            et_anns, et_arrays = build_et_annotations(
+                                et_seg, run_id, sent_idx, et_srate,
+                            )
+                            annotations.extend(et_anns)
+                            ann_arrays.update(et_arrays)
+
                         atom_id = compute_atom_id(
                             dataset_id=dataset_id,
                             subject_id=subject_id,
@@ -497,6 +604,11 @@ class Zuco2Importer(BaseImporter):
                                             "sentence_index": sent_idx,
                                             "duration_seconds": round(duration_s, 3),
                                             "signal_unit": "uV",
+                                            "has_word_features": bool(
+                                                results_sentences
+                                                and res_idx < len(results_sentences)
+                                            ),
+                                            "has_eye_tracking": et_seg is not None,
                                         },
                                     ),
                                 ],
@@ -514,17 +626,27 @@ class Zuco2Importer(BaseImporter):
                             },
                         )
 
+                        # Convert to pool storage unit (µV → µV, identity)
+                        signal, storage_unit, orig_unit = convert_to_storage_unit(
+                            signal, source_unit="uV", pool_config=self.pool.config,
+                        )
+                        atom.signal_unit = storage_unit
+                        atom.original_unit = orig_unit
+
                         # Validate
                         val_sig = signal[:, :min(5000, signal.shape[1])]
                         warnings = validate_signal(
                             signal=val_sig,
                             atom_id=atom_id,
                             config=self.pool.config.get("import", {}),
+                            signal_unit=storage_unit,
                         )
                         all_warnings.extend(warnings)
 
-                        # Write signal
-                        signal_ref = shard_mgr.write_atom_signal(atom_id, signal)
+                        # Write signal + companion data
+                        signal_ref = shard_mgr.write_atom_signal(
+                            atom_id, signal, ann_arrays or None,
+                        )
                         atom.signal_ref = signal_ref
 
                         writer.write_atom(atom)
@@ -580,6 +702,22 @@ class Zuco2Importer(BaseImporter):
         else:
             texts = [t for t in texts if t in available]
 
+        # ── Load results file for word-level features (best-effort) ──
+        results_sentences: Optional[List[Dict[str, Any]]] = None
+        results_path = find_results_file(dataset_dir.parent, subject_id, "tsr")
+        if results_path is not None:
+            try:
+                results_sentences = load_zuco_results_v5(results_path)
+                logger.info(
+                    "Loaded %d results sentences for %s/tsr from %s",
+                    len(results_sentences), subject_id, results_path.name,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to load results %s: %s", results_path.name, e,
+                )
+
+        sentence_offset = 0
         results = []
         for text_id in texts:
             mat_path = available[text_id]
@@ -589,6 +727,8 @@ class Zuco2Importer(BaseImporter):
                 dataset_id=dataset_id,
                 subject_id=subject_id,
                 max_sentences=max_sentences,
+                results_sentences=results_sentences,
+                results_offset=sentence_offset,
             )
 
             if atoms:
@@ -604,12 +744,16 @@ class Zuco2Importer(BaseImporter):
                     n_trials=len(atoms),
                 )
                 self.pool.register_run(run_meta)
+                self._write_channels_json(
+                    dataset_id, subject_id, f"ses-{text_id.lower()}", ch_infos
+                )
                 results.append(ImportResult(
                     atoms=atoms,
                     run_meta=run_meta,
                     channel_infos=ch_infos,
                     warnings=warnings,
                 ))
+                sentence_offset += len(atoms)
 
         total = sum(len(r.atoms) for r in results)
         logger.info(

@@ -478,6 +478,189 @@ def export(pool_path: str, query_yaml: str, output: Optional[str], fmt: str):
     indexer.close()
 
 
+@cli.command("export-pool")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("output", type=click.Path())
+@click.option("--dataset", "-d", multiple=True, help="Export only specific dataset(s).")
+@click.option("--subject", "-s", multiple=True, help="Export only specific subject(s). Use 'S01' or 'dataset_id/S01'.")
+@click.option("--since", type=str, help="Only datasets imported after this ISO date.")
+@click.option("--description", type=str, help="Archive description.")
+def export_pool_cmd(
+    pool_path: str, output: str,
+    dataset: tuple, subject: tuple,
+    since: Optional[str], description: Optional[str],
+):
+    """Export pool (or subset) as a .napool archive for sharing."""
+    from neuroatom.storage.pool_archive import export_pool
+
+    ds_ids = list(dataset) if dataset else None
+    sub_ids = list(subject) if subject else None
+    manifest = export_pool(
+        Path(pool_path), Path(output),
+        dataset_ids=ds_ids,
+        subject_ids=sub_ids,
+        since=since,
+        description=description,
+    )
+    click.echo(f"Exported: {manifest['n_files']} files, "
+               f"{len(manifest['datasets'])} datasets, "
+               f"{manifest['total_size_bytes'] / (1024*1024):.1f} MB")
+    click.echo(f"Archive: {output}")
+
+
+@cli.command("import-pool")
+@click.argument("archive_path", type=click.Path(exists=True))
+@click.argument("target_pool", type=click.Path())
+@click.option("--no-verify", is_flag=True, help="Skip SHA-256 integrity check.")
+@click.option("--no-merge", is_flag=True, help="Fail if target pool already exists.")
+def import_pool_cmd(
+    archive_path: str, target_pool: str,
+    no_verify: bool, no_merge: bool,
+):
+    """Import a .napool archive into a pool directory."""
+    from neuroatom.storage.pool_archive import import_pool
+
+    manifest = import_pool(
+        Path(archive_path), Path(target_pool),
+        verify=not no_verify,
+        merge=not no_merge,
+    )
+    click.echo(f"Imported: {len(manifest['datasets'])} datasets "
+               f"({manifest['n_files']} files)")
+    click.echo(f"Pool: {target_pool}")
+
+
+@cli.command("quality-report")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("dataset_id", type=str)
+@click.option("--json-out", "-j", type=click.Path(), help="Write JSON report to file.")
+@click.option("--all-datasets", is_flag=True, help="Run report for all datasets.")
+def quality_report_cmd(
+    pool_path: str, dataset_id: str,
+    json_out: Optional[str], all_datasets: bool,
+):
+    """Generate a quality assessment report for a dataset."""
+    from neuroatom.quality.gate import QualityGate
+    from neuroatom.quality.report import format_report, generate_quality_report
+
+    pool = Pool(Path(pool_path))
+
+    if all_datasets:
+        datasets = pool.list_datasets()
+    else:
+        datasets = [dataset_id]
+
+    for ds_id in datasets:
+        report = generate_quality_report(
+            pool, ds_id,
+            json_path=Path(json_out) if json_out and len(datasets) == 1 else None,
+        )
+        click.echo(format_report(report))
+
+        # Update dataset meta with tier
+        if report.tier:
+            try:
+                meta = pool.get_dataset_meta(ds_id)
+                meta.quality_tier = report.tier
+                from neuroatom.storage.metadata_store import write_json
+                from neuroatom.storage import paths as P
+                write_json(meta, P.dataset_meta_path(pool.root, ds_id))
+                click.echo(f"  → Updated {ds_id} quality_tier = {report.tier.value}")
+            except Exception as e:
+                click.echo(f"  Warning: could not update dataset meta: {e}")
+
+
+@cli.command("scaffold")
+@click.argument("name", type=str)
+@click.option("--output-dir", "-o", type=click.Path(), default=".",
+              help="Project root directory.")
+@click.option("--task-type", type=str, default="other", help="Task type.")
+@click.option("--channels", type=int, default=64, help="Number of channels.")
+@click.option("--sampling-rate", type=float, default=256.0, help="Sampling rate.")
+@click.option("--signal-unit", type=str, default="uV", help="Source signal unit.")
+@click.option("--file-format", type=str, default="mat", help="Source file format.")
+def scaffold_cmd(
+    name: str, output_dir: str, task_type: str,
+    channels: int, sampling_rate: float, signal_unit: str, file_format: str,
+):
+    """Generate importer boilerplate for a new dataset."""
+    from neuroatom.contrib.scaffold import scaffold_importer
+
+    generated = scaffold_importer(
+        name, Path(output_dir),
+        task_type=task_type, n_channels=channels,
+        sampling_rate=sampling_rate, signal_unit=signal_unit,
+        file_format=file_format,
+    )
+    for kind, path in generated.items():
+        click.echo(f"  {kind}: {path}")
+    click.echo(f"Scaffolded {len(generated)} files for '{name}'.")
+
+
+@cli.command("import-generic")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("data_dir", type=click.Path(exists=True))
+@click.option("--dataset-id", "-d", type=str, required=True, help="Dataset ID.")
+@click.option("--dataset-name", type=str, help="Human-readable dataset name.")
+@click.option("--sampling-rate", type=float, default=256.0, help="Sampling rate Hz.")
+@click.option("--signal-unit", type=str, default="uV", help="Source signal unit.")
+@click.option("--epoch-seconds", type=float, help="Split continuous data into fixed epochs.")
+def import_generic_cmd(
+    pool_path: str, data_dir: str, dataset_id: str,
+    dataset_name: Optional[str], sampling_rate: float,
+    signal_unit: str, epoch_seconds: Optional[float],
+):
+    """Import EEG data from numpy/CSV files with minimal configuration."""
+    from neuroatom.importers.generic import GenericImporter
+    from neuroatom.importers.base import TaskConfig
+
+    pool = Pool(Path(pool_path))
+    config = TaskConfig({
+        "dataset_id": dataset_id,
+        "dataset_name": dataset_name or dataset_id,
+        "signal_unit": signal_unit,
+        "custom": {"sampling_rate": sampling_rate},
+    })
+    importer = GenericImporter(pool=pool, task_config=config)
+    results = importer.import_dataset(
+        Path(data_dir),
+        dataset_id=dataset_id,
+        dataset_name=dataset_name,
+        sampling_rate=sampling_rate,
+        signal_unit=signal_unit,
+        epoch_seconds=epoch_seconds,
+    )
+    total_atoms = sum(r.n_atoms for r in results)
+    click.echo(f"Imported: {len(results)} subjects, {total_atoms} atoms")
+
+
+@cli.command("validate-import")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("dataset_id", type=str)
+@click.option("--check-signals", is_flag=True, help="Also verify HDF5 signal data (slow).")
+@click.option("--max-atoms", type=int, help="Limit number of atoms to check.")
+def validate_import_cmd(
+    pool_path: str, dataset_id: str,
+    check_signals: bool, max_atoms: Optional[int],
+):
+    """Validate imported atoms against NeuroAtom schema requirements."""
+    from neuroatom.contrib.validate_import import validate_import
+
+    pool = Pool(Path(pool_path))
+    report = validate_import(
+        pool, dataset_id,
+        check_signals=check_signals,
+        max_atoms=max_atoms,
+    )
+    click.echo(report.summary())
+    for err in report.errors:
+        click.echo(f"  {err}")
+    if report.is_valid:
+        click.echo("All checks passed.")
+    else:
+        raise SystemExit(1)
+
+
 @cli.command()
 @click.argument("pool_path", type=click.Path(exists=True))
 @click.option("--dry-run", is_flag=True, help="Show pending migrations without applying.")
@@ -504,6 +687,208 @@ def migrate(pool_path: str, dry_run: bool):
             click.echo(f"  Applied: {desc}")
     else:
         click.echo("No migration path available.")
+
+
+@cli.command("catalog-rebuild")
+@click.argument("pool_path", type=click.Path(exists=True))
+def catalog_rebuild_cmd(pool_path: str):
+    """Rebuild the local dataset catalog from pool metadata."""
+    from neuroatom.catalog.local import rebuild_catalog
+
+    pool = Pool(Path(pool_path))
+    catalog = rebuild_catalog(pool)
+    click.echo(f"Catalog rebuilt: {len(catalog.datasets)} datasets")
+    for entry in catalog.datasets:
+        tier = entry.quality_tier.value if entry.quality_tier else "—"
+        click.echo(f"  {entry.dataset_id}: {entry.name} [{tier}]")
+
+
+@cli.command("search")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.option("-q", "--query", type=str, help="Free-text search.")
+@click.option("-t", "--task-type", type=str, help="Filter by task type.")
+@click.option("--min-subjects", type=int, help="Minimum number of subjects.")
+@click.option("--min-channels", type=int, help="Minimum channel count.")
+@click.option("--tier", type=click.Choice(["silver", "gold", "platinum"]),
+              help="Filter by quality tier.")
+@click.option("--tag", type=str, help="Filter by tag.")
+def search_cmd(
+    pool_path: str, query: Optional[str], task_type: Optional[str],
+    min_subjects: Optional[int], min_channels: Optional[int],
+    tier: Optional[str], tag: Optional[str],
+):
+    """Search datasets in the local catalog."""
+    from neuroatom.catalog.local import load_catalog
+    from neuroatom.core.enums import QualityTier
+
+    pool = Pool(Path(pool_path))
+    catalog = load_catalog(pool)
+
+    tier_enum = None
+    if tier:
+        tier_enum = QualityTier(tier)
+
+    results = catalog.search(
+        query=query, task_type=task_type,
+        min_subjects=min_subjects, min_channels=min_channels,
+        tier=tier_enum, tag=tag,
+    )
+
+    if not results:
+        click.echo("No datasets found matching your criteria.")
+        click.echo(f"Catalog has {len(catalog.datasets)} total entries. "
+                   "Try 'neuroatom catalog-rebuild' if the catalog is stale.")
+        return
+
+    click.echo(f"Found {len(results)} dataset(s):\n")
+    for e in results:
+        tier_str = e.quality_tier.value if e.quality_tier else "—"
+        subj_str = str(e.n_subjects) if e.n_subjects else "?"
+        atoms_str = str(e.n_atoms) if e.n_atoms else "?"
+        tasks_str = ", ".join(e.task_types) if e.task_types else "—"
+        ch_str = (
+            f"{e.n_channels_range[0]}–{e.n_channels_range[1]}"
+            if e.n_channels_range else "?"
+        )
+        click.echo(f"  {e.dataset_id}")
+        click.echo(f"    Name:     {e.name}")
+        click.echo(f"    Tasks:    {tasks_str}")
+        click.echo(f"    Subjects: {subj_str}   Atoms: {atoms_str}   Channels: {ch_str}")
+        click.echo(f"    Tier:     {tier_str}")
+        if e.description:
+            click.echo(f"    Desc:     {e.description}")
+        click.echo()
+
+
+@cli.command("catalog-sync")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.option("--url", type=str, help="Remote catalog URL to sync from.")
+def catalog_sync_cmd(pool_path: str, url: Optional[str]):
+    """Sync local catalog with remote registries."""
+    from neuroatom.catalog.remote import merge_remote, list_registries
+
+    pool = Pool(Path(pool_path))
+
+    urls = [url] if url else list_registries(pool)
+    if not urls:
+        click.echo("No remote registries configured. Use --url or add to pool.yaml:\n"
+                    "  catalog:\n    registries:\n      - https://example.com/catalog.json")
+        return
+
+    total = 0
+    for u in urls:
+        try:
+            count = merge_remote(pool, u)
+            click.echo(f"  {u}: {count} entries merged")
+            total += count
+        except ConnectionError as e:
+            click.echo(f"  {u}: FAILED — {e}")
+
+    click.echo(f"Sync complete: {total} entries updated")
+
+
+@cli.command("pull")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("dataset_id", type=str)
+@click.option("--url", type=str, help="Direct URL to .napool file.")
+def pull_cmd(pool_path: str, dataset_id: str, url: Optional[str]):
+    """Download and import a dataset from a remote .napool archive."""
+    from neuroatom.catalog.remote import pull_dataset
+
+    pool = Pool(Path(pool_path))
+    try:
+        ds_dir = pull_dataset(pool, dataset_id, pool_url=url)
+        click.echo(f"Pulled '{dataset_id}' → {ds_dir}")
+    except (ValueError, ConnectionError) as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+
+@cli.command("import-snhl")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("data_path", type=click.Path(exists=True))
+@click.option("--tasks", "-t", multiple=True, default=["selectiveattention"],
+              help="Tasks to import (selectiveattention, tonestimuli, rest).")
+@click.option("--subjects", "-s", multiple=True, help="Subset of subjects.")
+@click.option("--max-subjects", type=int, help="Limit number of subjects.")
+def import_snhl_cmd(
+    pool_path: str, data_path: str,
+    tasks: tuple, subjects: tuple, max_subjects: Optional[int],
+):
+    """Import ds-eeg-snhl (AAD with EarEEG) dataset."""
+    from neuroatom.importers.base import TaskConfig
+    from neuroatom.importers.snhl_aad import SNHLAADImporter
+
+    pool = Pool(Path(pool_path))
+    tc = TaskConfig.builtin("snhl_aad")
+    imp = SNHLAADImporter(pool=pool, task_config=tc)
+    results = imp.import_dataset(
+        Path(data_path),
+        tasks=list(tasks),
+        subjects=list(subjects) if subjects else None,
+        max_subjects=max_subjects,
+    )
+    total = sum(len(r.atoms) for r in results)
+    click.echo(f"Imported {len(results)} runs, {total} atoms total.")
+
+
+@cli.command("import-zuco1")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("data_path", type=click.Path(exists=True))
+@click.option("--tasks", "-t", multiple=True, default=["sr", "nr", "tsr"],
+              help="Tasks to import (sr, nr, tsr).")
+@click.option("--subjects", "-s", multiple=True, help="Subset of subject codes.")
+@click.option("--max-texts", type=int, help="Max texts per subject per task.")
+@click.option("--max-sentences", type=int, help="Max sentences per text.")
+def import_zuco1_cmd(
+    pool_path: str, data_path: str,
+    tasks: tuple, subjects: tuple,
+    max_texts: Optional[int], max_sentences: Optional[int],
+):
+    """Import ZuCo 1.0 multi-task natural reading dataset."""
+    from neuroatom.importers.base import TaskConfig
+    from neuroatom.importers.zuco1 import Zuco1Importer
+
+    pool = Pool(Path(pool_path))
+    tc = TaskConfig.builtin("zuco1_sr")
+    imp = Zuco1Importer(pool=pool, task_config=tc)
+    results = imp.import_dataset(
+        Path(data_path),
+        tasks=list(tasks),
+        subjects=list(subjects) if subjects else None,
+        max_texts=max_texts,
+        max_sentences=max_sentences,
+    )
+    total = sum(len(r.atoms) for r in results)
+    click.echo(f"Imported {len(results)} runs, {total} atoms total.")
+
+
+@cli.command("import-eeg-ieeg")
+@click.argument("pool_path", type=click.Path(exists=True))
+@click.argument("data_path", type=click.Path(exists=True))
+@click.option("--subjects", "-s", multiple=True, help="Subset of subjects.")
+@click.option("--max-sessions", type=int, help="Max sessions per subject.")
+@click.option("--modalities", "-m", multiple=True, default=["eeg", "ieeg"],
+              help="Modalities to import (eeg, ieeg).")
+def import_eeg_ieeg_cmd(
+    pool_path: str, data_path: str,
+    subjects: tuple, max_sessions: Optional[int], modalities: tuple,
+):
+    """Import EEG-iEEG verbal working memory paired dataset."""
+    from neuroatom.importers.base import TaskConfig
+    from neuroatom.importers.eeg_ieeg_wm import EEGiEEGWMImporter
+
+    pool = Pool(Path(pool_path))
+    tc = TaskConfig.builtin("eeg_ieeg_wm")
+    imp = EEGiEEGWMImporter(pool=pool, task_config=tc)
+    results = imp.import_dataset(
+        Path(data_path),
+        subjects=list(subjects) if subjects else None,
+        max_sessions=max_sessions,
+        modalities=list(modalities),
+    )
+    total = sum(len(r.atoms) for r in results)
+    click.echo(f"Imported {len(results)} runs, {total} atoms total.")
 
 
 def main():

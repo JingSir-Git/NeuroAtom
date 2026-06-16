@@ -218,6 +218,7 @@ class BaseImporter(ABC):
 
         This is the main entry point for importing data.
         """
+        from neuroatom.utils.unit_convert import convert_to_storage_unit
         from neuroatom.utils.validation import validate_signal
 
         dataset_id = self._task_config.dataset_id
@@ -284,11 +285,21 @@ class BaseImporter(ABC):
                     # Extract signal data from raw
                     signal = self._extract_atom_signal(raw, atom, channel_infos)
 
-                    # Validate signal
+                    # Convert to pool storage unit (V → µV)
+                    declared_unit = extra_meta.get("declared_unit", "V")
+                    signal, storage_unit, orig_unit = convert_to_storage_unit(
+                        signal, source_unit=declared_unit,
+                        pool_config=self._pool.config,
+                    )
+                    atom.signal_unit = storage_unit
+                    atom.original_unit = orig_unit
+
+                    # Validate signal (now in storage unit)
                     validation_warnings = validate_signal(
                         signal=signal,
                         atom_id=atom.atom_id,
                         config=self._pool.config.get("import", {}),
+                        signal_unit=storage_unit,
                     )
                     warnings.extend(validation_warnings)
 
@@ -311,6 +322,11 @@ class BaseImporter(ABC):
         # 7. Register metadata in pool
         self._pool.register_run(run_meta)
 
+        # 8. Persist channel_id → standard_name mapping (channels.json)
+        self._write_channels_json(
+            dataset_id, subject_id, session_id, channel_infos
+        )
+
         logger.info(
             "Imported run %s/%s/%s/%s: %d atoms",
             dataset_id, subject_id, session_id, run_id, len(atoms),
@@ -326,6 +342,39 @@ class BaseImporter(ABC):
     # ------------------------------------------------------------------
     # Helpers (overridable)
     # ------------------------------------------------------------------
+
+    def _write_channels_json(
+        self,
+        dataset_id: str,
+        subject_id: str,
+        session_id: str,
+        channel_infos: List[ChannelInfo],
+    ) -> None:
+        """Write channel_id → standard_name mapping to channels.json.
+
+        This is written once per session (first run wins). Subsequent runs
+        skip if the file already exists.
+        """
+        from neuroatom.storage import paths as P
+        import json
+
+        ch_file = P.channels_path(
+            self._pool.root, dataset_id, subject_id, session_id
+        )
+        if ch_file.exists():
+            return  # already written by a prior run in this session
+
+        ch_file.parent.mkdir(parents=True, exist_ok=True)
+        records = []
+        for ch in channel_infos:
+            records.append({
+                "channel_id": ch.channel_id,
+                "name": ch.name,
+                "standard_name": ch.standard_name,
+                "channel_type": ch.type.value if ch.type else None,
+            })
+        with open(ch_file, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2, ensure_ascii=False)
 
     def _extract_atom_signal(
         self, raw: Any, atom: Atom, channel_infos: List[ChannelInfo]
