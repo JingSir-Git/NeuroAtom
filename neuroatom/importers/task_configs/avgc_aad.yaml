@@ -1,0 +1,50 @@
+# Task Configuration: AV-GC-AAD Audio-Visual Gaze-Controlled AAD
+# KU Leuven (2024). Auditory attention decoding with a visual manipulation.
+#
+# Subjects attend one of two competing Flemish speech streams (left vs right)
+# under three visual conditions (NoVisuals / FixedVideo / MovingVideo).
+#
+# DYNAMIC ATTENTION: within each ~600 s trial the attended side switches at
+# `switch_times` (typically once, at 300 s). Each trial is therefore stored as
+# a single TRIAL atom flagged `dynamic_attention=true` with a
+# `switch_time_seconds` annotation — downstream code must window around the
+# switch rather than treat the whole atom as one static label.
+#
+# 68 channels: 64 BioSemi scalp EEG (10-20 names) + EXG3-6 external (→ EOG).
+# Precomputed attended / unattended / left / right speech envelopes are stored
+# as ContinuousAnnotation companion arrays (128 Hz, trigger-locked).
+
+dataset_id: "avgc_aad"
+dataset_name: "AV-GC-AAD Audio-Visual Gaze-Controlled AAD (KU Leuven 2024)"
+task_type: "auditory_attention_decoding"
+original_format: "mat"
+
+# Preprocessed: high-pass filtered, downsampled to 128 Hz, stored in µV.
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+  # Each trial is one continuous ~600 s segment with a mid-trial attention switch.
+
+event_mapping:
+  left: "attend_left"
+  right: "attend_right"
+
+# EXG3-6 are external electrodes — typed as EOG by the importer.
+channel_type_overrides: {}
+
+exclude_channels: []
+
+custom:
+  cap: "BioSemi64"
+  original_sampling_rate: 8192
+  preprocessing: "downsampled to 128 Hz, µV"
+  paradigm: "cocktail_party_audiovisual"
+  trial_duration_seconds: 600
+  n_trials_per_subject: 6
+  visual_conditions: ["no_visuals", "fixed_video", "moving_video"]
+  attention_dynamics: "switches mid-trial at switch_times"
+  has_audio_envelopes: true
+  envelopes: ["attended", "unattended", "left", "right"]
+  institution: "KU Leuven"
+  citation: "AV-GC-AAD, KU Leuven 2024"
