@@ -1,0 +1,38 @@
+# Task Configuration: ear-EEG-AAD (TMSi SAGA Poly5)
+# 16 subjects, ear + scalp EEG auditory attention, one continuous TMSi SAGA
+# recording each (~66 min @ 500 Hz) in .Poly5 (TMS32) format.
+#
+# Read via a self-contained Poly5 reader (MNE can't read Poly5). SAGA stores each
+# channel as a (Lo)/(Hi) pair, so true channels = NumberOfSignals//2; data are
+# float32 already in µV. UNI*/BIP* channels are kept as EEG; TRIGGERS/STATUS/
+# Counter/PLETH/HRate/Stat are device/aux and dropped.
+#
+# LABELS: no attention-label source exists in the dataset (only Record.xses
+# session XML), so each subject is one CONTINUOUS_SEGMENT atom with
+# label_provenance="unresolved". Signal preserved faithfully; labels attachable
+# later if a source surfaces.
+
+dataset_id: "ear_eeg_aad"
+dataset_name: "ear-EEG-AAD (TMSi SAGA, labels unresolved)"
+task_type: "auditory_attention_decoding"
+original_format: "poly5"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "continuous"
+
+event_mapping: {}
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 16
+  sampling_rate: 500
+  modality: "ear_eeg"
+  format: "TMSi SAGA Poly5 / TMS32 v2.03 (custom reader; (Lo)/(Hi) channel pairing)"
+  eeg_channels: "UNI* / BIP*"
+  dropped_channels: ["TRIGGERS", "STATUS", "Counter 2power24", "PLETH", "HRate", "Stat"]
+  labels: "UNRESOLVED — no attention-label source (only Record.xses session XML)"
+  label_provenance: "unresolved"
