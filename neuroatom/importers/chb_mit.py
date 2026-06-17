@@ -139,7 +139,10 @@ class CHBMITImporter(BaseImporter):
         summary = _parse_summary(summary_path) if summary_path else {"files": {}}
         seizure_map = summary.get("files", {})
 
-        edf_files = sorted(case_dir.glob(f"{case_dir.name}_*.edf"))
+        # NB: glob "{case}*.edf" (not "{case}_*.edf") — session-split cases store
+        # files as chb17a_03.edf / chb17b_*.edf / chb17c_*.edf (no "chb17_" prefix),
+        # which a "{case}_*" glob would silently drop (the whole subject).
+        edf_files = sorted(case_dir.glob(f"{case_dir.name}*.edf"))
         if only_files:
             wanted = set(only_files)
             edf_files = [f for f in edf_files if f.name in wanted]

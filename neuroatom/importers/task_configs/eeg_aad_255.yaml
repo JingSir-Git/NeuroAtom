@@ -32,7 +32,7 @@ exclude_channels:
   - Trigger
 
 custom:
-  n_subjects: 32
+  n_subjects: 30
   n_recordings_per_subject: 4
   n_channels: 255
   external_channels: ["XtraL", "XtraR"]

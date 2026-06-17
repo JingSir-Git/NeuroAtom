@@ -100,3 +100,14 @@ class TestLEMONImporter:
         with h5py.File(str(shard_path), "r") as f:
             sig = f[f"/atoms/{atom.atom_id}/signal"][:]
             assert sig.shape[1] == 10 * 250  # 10 s @ 250 Hz
+
+    def test_e0_filename_typo_handled(self, pool, task_config):
+        """sub-010229_E0.set (zero, a typo for _EO) must import as eyes_open, not be skipped."""
+        e0 = PPDIR / "sub-010229_E0.set"
+        if not e0.exists():
+            pytest.skip("E0-typo file not present")
+        from neuroatom.importers.lemon import LEMONImporter
+        imp = LEMONImporter(pool=pool, task_config=task_config)
+        result = imp.import_recording(e0, max_seconds=10)
+        ann = {a.name: a.value for a in result.atoms[0].annotations}
+        assert ann["condition"] == "eyes_open"

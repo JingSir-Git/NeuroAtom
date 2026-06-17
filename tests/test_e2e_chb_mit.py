@@ -106,3 +106,17 @@ class TestCHBMITImporter:
             sig = f[f"/atoms/{atom.atom_id}/signal"][:]
             assert sig.shape[0] == 23
             assert sig.shape[1] == 30 * 256  # 30 s @ 256 Hz
+
+    def test_chb17_session_split_discovered(self, pool, task_config):
+        """chb17 stores files as chb17a/b/c_*.edf — the per-case glob must find them."""
+        case17 = DATA_ROOT / "chb17"
+        if not case17.is_dir():
+            pytest.skip("chb17 not present")
+        from neuroatom.importers.chb_mit import CHBMITImporter
+        imp = CHBMITImporter(pool=pool, task_config=task_config)
+        result = imp.import_case(case17, max_files=1, max_seconds=10)
+        assert len(result.atoms) == 1
+        atom = result.atoms[0]
+        assert atom.subject_id == "chb17"
+        # the discovered recording is one of the session-split files (chb17a/b/c)
+        assert atom.custom_fields["recording"].startswith("chb17")

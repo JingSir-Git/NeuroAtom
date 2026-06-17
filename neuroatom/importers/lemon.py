@@ -45,8 +45,10 @@ from neuroatom.utils.validation import validate_signal
 
 logger = logging.getLogger(__name__)
 
-_FILE_RE = re.compile(r"(sub-\w+?)_(EC|EO)$", re.IGNORECASE)
-_CONDITION = {"EC": "eyes_closed", "EO": "eyes_open"}
+_FILE_RE = re.compile(r"(sub-\w+?)_(E[CO0])$", re.IGNORECASE)
+# "E0" (zero) is a dataset filename typo for "EO" (eyes-open) — handle it so the
+# file isn't silently skipped.
+_CONDITION = {"EC": "eyes_closed", "EO": "eyes_open", "E0": "eyes_open"}
 _EOG = {"VEOG", "HEOG", "EOG", "VEO", "HEO"}
 
 
