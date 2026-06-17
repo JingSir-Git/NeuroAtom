@@ -1,0 +1,47 @@
+# Task Configuration: Sleep-EDF Expanded polysomnography sleep staging
+# PhysioNet. sleep-cassette (SC, healthy ambulatory) + sleep-telemetry (ST,
+# temazepam study). Each recording = {ID}-PSG.edf + {ID}-Hypnogram.edf.
+#
+# Kept channels: EEG Fpz-Cz, EEG Pz-Oz, EOG horizontal, EMG submental (the
+# scoreable montage). Dropped: Resp oro-nasal / Temp rectal / Event marker
+# (1 Hz PSG extras). EEG/EOG @ 100 Hz.
+#
+# One 30 s WINDOW atom per epoch, labelled with its R&K sleep stage
+# (W / N1 / N2 / N3 / N4 / REM). Long ambulatory wake is trimmed to ±30 min
+# around sleep by default (crop_wake_mins, configurable / disable with None).
+
+dataset_id: "sleep_edf"
+dataset_name: "Sleep-EDF Expanded (polysomnography sleep staging)"
+task_type: "sleep_staging"
+original_format: "edf"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "window"
+  window_seconds: 30
+
+event_mapping:
+  "Sleep stage W": "W"
+  "Sleep stage 1": "N1"
+  "Sleep stage 2": "N2"
+  "Sleep stage 3": "N3"
+  "Sleep stage 4": "N4"
+  "Sleep stage R": "REM"
+
+channel_type_overrides: {}
+exclude_channels:
+  - "Resp oro-nasal"
+  - "Temp rectal"
+  - "Event marker"
+
+custom:
+  studies: ["sleep-cassette", "sleep-telemetry"]
+  epoch_seconds: 30
+  sampling_rate: 100
+  kept_channels: ["EEG Fpz-Cz", "EEG Pz-Oz", "EOG horizontal", "EMG submental"]
+  stages: ["W", "N1", "N2", "N3", "N4", "REM"]
+  scoring: "Rechtschaffen & Kales (separate N3/N4)"
+  crop_wake_mins_default: 30
+  subject_demographics: "SC-subjects.xls / ST-subjects.xls (not yet imported)"
+  citation: "Kemp et al. 2000; PhysioNet Sleep-EDF Expanded"
