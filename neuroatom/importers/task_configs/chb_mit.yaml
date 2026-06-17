@@ -1,0 +1,35 @@
+# Task Configuration: CHB-MIT scalp-EEG seizure dataset
+# PhysioNet (Shoeb 2009). 23 pediatric epilepsy subjects (chb01-chb24),
+# continuous scalp EEG in a bipolar longitudinal montage, 256 Hz. ~1 h EDF files
+# per case + a chbXX-summary.txt giving the montage and per-file seizure
+# start/end times (seconds).
+#
+# Each EDF file → one CONTINUOUS_SEGMENT atom carrying seizure intervals as
+# annotations (has_seizure flag, n_seizures count, seizure_intervals list +
+# per-seizure onset). Downstream windows into ictal/interictal via the assembler;
+# we import faithfully rather than baking in a windowing/sampling choice.
+
+dataset_id: "chb_mit"
+dataset_name: "CHB-MIT Scalp EEG Seizure Database"
+task_type: "seizure_detection"
+original_format: "edf"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "continuous"
+
+event_mapping: {}
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 23
+  sampling_rate: 256
+  montage: "bipolar longitudinal (FP1-F7, F7-T7, ...)"
+  n_channels: 23
+  paradigm: "seizure_detection"
+  seizure_times_source: "chbXX-summary.txt"
+  atom_granularity: "one CONTINUOUS_SEGMENT per ~1 h EDF; seizure intervals as annotations"
+  citation: "Shoeb 2009; Goldberger et al. (PhysioNet)"
