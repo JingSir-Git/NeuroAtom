@@ -1,17 +1,19 @@
-# Task Configuration: ASA auditory spatial attention (SCUT analysis set)
+# Task Configuration: ASA auditory spatial attention dataset
+# "ASA: An Auditory Spatial Attention Dataset with Multiple Speaking Locations".
 # 20 subjects (S001-S020), block E1 of 20 per-trial MNE FIF files each,
-# 64-ch 10-20 EEG @ 500 Hz. Each file marks its attended window with
-# trail{N}S / trail{N}E annotations.
+# 64-ch 10-20 EEG @ 500 Hz. Two competing talkers at one of five spatial
+# separations; the listener attends one side.
 #
-# IMPORTANT: attention labels are NOT imported. The folder's db/SCUT.py defines a
-# 32-trial [direction, speaker] table, but these recordings have 20 trials and no
-# per-trial label file, so that table (and its subject>8 reorder) cannot be mapped
-# reliably. We import signal + trial structure faithfully and flag
-# label_provenance="unresolved"; attention labels can be attached later once the
-# 20-trial mapping is provided.
+# Labels come from the dataset's own main.py (uniform across all subjects):
+#   - attended_direction: binary, per-trial list
+#       [0,1,1,0,0,1,0,1,0,1,1,0,0,1,0,1,0,1,1,0]
+#   - spatial_separation_deg: trials 1-4 -> 90, 5-8 -> 60, 9-12 -> 45,
+#       13-16 -> 30, 17-20 -> 5
+# (The unrelated db/SCUT.py 32-trial table is borrowed code and does NOT apply.)
+# Each trial is cropped to its trail{N}S -> trail{N}E attended window.
 
 dataset_id: "asa"
-dataset_name: "ASA Auditory Spatial Attention (per-trial FIF, labels unresolved)"
+dataset_name: "ASA Auditory Spatial Attention (Multiple Speaking Locations)"
 task_type: "auditory_attention_decoding"
 original_format: "fif"
 
@@ -22,7 +24,9 @@ trial_definition:
   anchor_events: ["trailS"]
   end_events: ["trailE"]
 
-event_mapping: {}
+event_mapping:
+  "0": "attend_direction_0"
+  "1": "attend_direction_1"
 
 channel_type_overrides: {}
 exclude_channels: []
@@ -33,6 +37,7 @@ custom:
   sampling_rate: 500
   n_channels: 64
   paradigm: "auditory_spatial_attention"
-  labels: "UNRESOLVED — 20 FIF trials do not map to the 32-trial SCUT label table; no per-trial label file"
-  label_provenance: "unresolved"
-  related: "shares db/SCUT.py template with the esaa importer (32-trial protocol)"
+  spatial_separations_deg: [90, 60, 45, 30, 5]
+  label_source: "dataset main.py (per-trial attended_direction + separation group)"
+  label_provenance: "asa_main_py"
+  citation: "ASA: An Auditory Spatial Attention Dataset with Multiple Speaking Locations"

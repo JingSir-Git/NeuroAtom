@@ -5,13 +5,14 @@ per-trial MNE FIF: ``S001_E1_Trial1_raw.fif`` … 64-channel 10-20 EEG @ 500 Hz.
 Each file carries two annotations marking the attended-listening window:
 ``trail{N}S`` (start) and ``trail{N}E`` (end).
 
-ATTENTION LABELS ARE NOT IMPORTED. The folder ships ``db/SCUT.py`` with a fixed
-**32**-trial ``[direction, speaker]`` table, but these recordings have **20**
-trials and no per-trial label file, so the 32-trial table (and its subject>8
-reorder) cannot be mapped to them reliably. The ``.fif`` annotations give only
-trial boundaries. Rather than risk silently-wrong AAD labels we import the
-signal + trial structure faithfully and flag ``label_provenance="unresolved"``;
-attention labels can be attached later once the 20-trial mapping is provided.
+Two competing talkers are placed at one of five spatial separations (±90°, ±60°,
+±45°, ±30°, ±5°); the listener attends one side. Labels come from the dataset's
+own ``main.py``: a fixed per-trial binary attended-direction list (uniform across
+all 20 subjects, no reorder) and a separation angle implied by the trial group
+(trials 1-4 → 90°, 5-8 → 60°, 9-12 → 45°, 13-16 → 30°, 17-20 → 5°). The unrelated
+``db/SCUT.py`` (a 32-trial table borrowed from another dataset) does NOT apply
+here. Each trial atom carries ``attended_direction`` (binary) +
+``spatial_separation_deg``.
 
 Data layout::
 
@@ -51,6 +52,20 @@ logger = logging.getLogger(__name__)
 
 _TRIAL_RE = re.compile(r"_Trial(\d+)_raw$", re.IGNORECASE)
 _SUBJECT_RE = re.compile(r"^S\d+$", re.IGNORECASE)
+
+# Per-trial labels from the dataset's own main.py (uniform across all subjects).
+# Binary attended direction for trials 1..20:
+_DIRECTION_LABELS = [0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0]
+# Speaker spatial separation (degrees) by trial group:
+_SEPARATION_DEG = [90] * 4 + [60] * 4 + [45] * 4 + [30] * 4 + [5] * 4
+
+
+def _trial_label(trial_num: int) -> Tuple[Optional[str], Optional[int]]:
+    """(attended_direction, separation_deg) for a 1-indexed trial, per main.py."""
+    i = trial_num - 1
+    if 0 <= i < len(_DIRECTION_LABELS):
+        return str(_DIRECTION_LABELS[i]), _SEPARATION_DEG[i]
+    return None, None
 
 
 def _segment_bounds(raw: Any, sfreq: float) -> Tuple[int, int]:
@@ -179,6 +194,8 @@ class ASAImporter(BaseImporter):
             run_id = f"trial_{trial_num:02d}"
             self.pool.ensure_run(dataset_id, subject_id, session_id, run_id)
 
+            direction, separation = _trial_label(trial_num)
+
             atom_id = compute_atom_id(
                 dataset_id=dataset_id, subject_id=subject_id,
                 session_id=session_id, run_id=run_id, onset_sample=0,
@@ -198,19 +215,29 @@ class ASAImporter(BaseImporter):
                 channel_ids=channel_ids, n_channels=len(channel_ids),
                 sampling_rate=sfreq, signal_unit=storage_unit, original_unit=orig_unit,
                 annotations=[
+                    CategoricalAnnotation(
+                        annotation_id=f"ann_dir_{run_id}",
+                        name="attended_direction", value=direction or "unknown",
+                    ),
+                    NumericAnnotation(
+                        annotation_id=f"ann_sep_{run_id}",
+                        name="spatial_separation_deg",
+                        numeric_value=float(separation) if separation is not None else -1.0,
+                    ),
                     NumericAnnotation(
                         annotation_id=f"ann_trial_{run_id}",
                         name="trial_number", numeric_value=float(trial_num),
                     ),
                     CategoricalAnnotation(
                         annotation_id=f"ann_prov_{run_id}",
-                        name="label_provenance", value="unresolved",
+                        name="label_provenance", value="asa_main_py",
                     ),
                 ],
                 custom_fields={
                     "trial_number": trial_num,
-                    # Attention labels not available; see module docstring.
-                    "label_provenance": "unresolved",
+                    "attended_direction": direction,
+                    "spatial_separation_deg": separation,
+                    "label_provenance": "asa_main_py",
                 },
             )
             all_warnings.extend(validate_signal(
@@ -235,12 +262,16 @@ class ASAImporter(BaseImporter):
                 run_id=run_id, session_id=session_id, subject_id=subject_id,
                 dataset_id=dataset_id, run_index=trial_num,
                 task_type=self.task_config.task_type, n_trials=1,
-                paradigm_details={"trial_number": trial_num},
+                paradigm_details={
+                    "trial_number": trial_num,
+                    "attended_direction": direction,
+                    "spatial_separation_deg": separation,
+                },
             ))
             self._write_channels_json(dataset_id, subject_id, session_id, channel_infos)
             stored_atoms.append(atom)
 
-        logger.info("Imported ASA %s: %d trials (no attention labels)", subject_id, len(stored_atoms))
+        logger.info("Imported ASA %s: %d trials", subject_id, len(stored_atoms))
         run_meta = RunMeta(
             run_id=stored_atoms[0].run_id if stored_atoms else "trial_01",
             session_id=session_id, subject_id=subject_id, dataset_id=dataset_id,

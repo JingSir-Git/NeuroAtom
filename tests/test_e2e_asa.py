@@ -64,10 +64,26 @@ class TestASAImporter:
 
         ann = {a.name: a for a in atom.annotations}
         assert ann["trial_number"].numeric_value == 1.0
-        # labels are deliberately not assigned
-        assert ann["label_provenance"].value == "unresolved"
-        assert "attended_direction" not in ann
-        assert atom.custom_fields["label_provenance"] == "unresolved"
+        # labels resolved from the dataset's main.py
+        assert ann["label_provenance"].value == "asa_main_py"
+        # trial 1 -> direction 0, separation 90 deg
+        assert ann["attended_direction"].value == "0"
+        assert ann["spatial_separation_deg"].numeric_value == 90.0
+        assert atom.custom_fields["attended_direction"] == "0"
+
+    def test_labels_match_main_py(self, pool, task_config):
+        """attended_direction + separation follow the main.py per-trial lists."""
+        from neuroatom.importers.asa import ASAImporter, _DIRECTION_LABELS
+
+        imp = ASAImporter(pool=pool, task_config=task_config)
+        result = imp.import_subject(S001, max_trials=6)
+        for atom in result.atoms:
+            t = atom.trial_index
+            ann = {a.name: a for a in atom.annotations}
+            assert ann["attended_direction"].value == str(_DIRECTION_LABELS[t - 1])
+            # trials 1-4 are the 90 deg group, 5-8 the 60 deg group
+            expected_sep = 90.0 if t <= 4 else 60.0
+            assert ann["spatial_separation_deg"].numeric_value == expected_sep
 
     def test_segment_cropped_to_attended_window(self, pool, task_config):
         """The atom is cropped to trailS->trailE, shorter than the full ~61 s file."""
