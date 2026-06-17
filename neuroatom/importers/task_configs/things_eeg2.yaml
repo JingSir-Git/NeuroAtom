@@ -1,0 +1,37 @@
+# Task Configuration: THINGS-EEG2 visual object-recognition EEG
+# Gifford et al. 2022. 10 subjects, RSVP of THINGS object images. Preprocessed
+# release: per subject, training + test arrays of shape
+# (n_image_conditions, n_repetitions, n_channels, n_times) at 100 Hz.
+#
+# Two channel variants: 17-ch occipito-parietal subset (sub-XX/) and the full
+# 63-ch montage (sub-XX__63_channels/). Each epoch (one image presentation)
+# becomes one EVENT_EPOCH atom labelled with image_condition / repetition / split.
+#
+# NOTE: the published data is multivariate-noise-normalised (whitened), NOT µV,
+# so it is imported as-is with signal_unit "au".
+
+dataset_id: "things_eeg2"
+dataset_name: "THINGS-EEG2 Visual Object Recognition"
+task_type: "visual_object_recognition"
+original_format: "npy"
+
+signal_unit: "au"
+
+trial_definition:
+  mode: "event_epoch"
+
+event_mapping: {}
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 10
+  sampling_rate: 100
+  epoch_window_s: [-0.2, 0.8]
+  channel_variants: {default: 17, full: 63}
+  splits: ["training", "test"]
+  paradigm: "rapid_serial_visual_presentation"
+  normalization: "multivariate noise normalisation (whitened, a.u.)"
+  scale_note: "~82k epochs/subject at full scope; use max_conditions/max_reps to subset"
+  citation: "Gifford et al., NeuroImage 2022 (THINGS-EEG2)"
