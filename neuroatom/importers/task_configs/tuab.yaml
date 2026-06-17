@@ -1,0 +1,36 @@
+# Task Configuration: TUAB — TUH Abnormal EEG Corpus
+# Temple University Hospital. Clinical scalp EEG labelled normal / abnormal,
+# pre-split into train / eval. TUH 01_tcp_ar averaged-reference montage,
+# "EEG <name>-REF" channel naming. Sampling rate / channel count vary per file.
+#
+# Each EDF recording → one CONTINUOUS_SEGMENT atom labelled with its diagnosis
+# (label = normal/abnormal) and split (train/eval). ROC/LOC → EOG, EKG → ECG,
+# A1/A2 → REF; remaining channels EEG. ~3000 recordings (~20 min each) — use
+# max_files / max_seconds to scope import.
+
+dataset_id: "tuab"
+dataset_name: "TUH Abnormal EEG Corpus (TUAB)"
+task_type: "abnormal_detection"
+original_format: "edf"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "continuous"
+
+event_mapping:
+  normal: "normal"
+  abnormal: "abnormal"
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  splits: ["train", "eval"]
+  labels: ["normal", "abnormal"]
+  montage: "01_tcp_ar (TUH averaged reference)"
+  channel_naming: "EEG <name>-REF"
+  paradigm: "pathology_detection"
+  n_recordings: 2993
+  scale_note: "large corpus; use max_files / max_seconds to subset"
+  citation: "Lopez et al.; TUH EEG Corpus (Obeid & Picone 2016)"
