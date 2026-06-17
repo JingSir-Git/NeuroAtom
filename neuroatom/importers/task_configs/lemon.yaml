@@ -1,0 +1,31 @@
+# Task Configuration: LEMON resting-state EEG (MPI-Leipzig Mind-Brain-Body)
+# Babayan et al. 2019. Per subject, eyes-closed (EC) + eyes-open (EO) resting
+# state, ICA-cleaned EEGLAB .set/.fdt at 250 Hz, ~8 min each, ~59-62 ch.
+#
+# Resting state has no trial structure: each sub-XXXXXX_{EC,EO}.set becomes one
+# CONTINUOUS_SEGMENT atom labelled with its condition (eyes_closed / eyes_open).
+
+dataset_id: "lemon"
+dataset_name: "LEMON Resting-State EEG (MPI-Leipzig)"
+task_type: "resting_state"
+original_format: "eeglab"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "continuous"
+
+event_mapping:
+  EC: "eyes_closed"
+  EO: "eyes_open"
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  sampling_rate: 250
+  conditions: ["eyes_closed", "eyes_open"]
+  paradigm: "resting_state"
+  preprocessing: "ICA-cleaned EEGLAB (preprocessed/EEG_Preprocessed)"
+  cap: "BrainAmp ~62ch"
+  citation: "Babayan et al., Sci Data 2019 (LEMON)"
