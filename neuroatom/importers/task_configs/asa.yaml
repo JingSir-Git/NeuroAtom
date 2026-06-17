@@ -1,0 +1,38 @@
+# Task Configuration: ASA auditory spatial attention (SCUT analysis set)
+# 20 subjects (S001-S020), block E1 of 20 per-trial MNE FIF files each,
+# 64-ch 10-20 EEG @ 500 Hz. Each file marks its attended window with
+# trail{N}S / trail{N}E annotations.
+#
+# IMPORTANT: attention labels are NOT imported. The folder's db/SCUT.py defines a
+# 32-trial [direction, speaker] table, but these recordings have 20 trials and no
+# per-trial label file, so that table (and its subject>8 reorder) cannot be mapped
+# reliably. We import signal + trial structure faithfully and flag
+# label_provenance="unresolved"; attention labels can be attached later once the
+# 20-trial mapping is provided.
+
+dataset_id: "asa"
+dataset_name: "ASA Auditory Spatial Attention (per-trial FIF, labels unresolved)"
+task_type: "auditory_attention_decoding"
+original_format: "fif"
+
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+  anchor_events: ["trailS"]
+  end_events: ["trailE"]
+
+event_mapping: {}
+
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 20
+  n_trials_per_subject: 20
+  sampling_rate: 500
+  n_channels: 64
+  paradigm: "auditory_spatial_attention"
+  labels: "UNRESOLVED — 20 FIF trials do not map to the 32-trial SCUT label table; no per-trial label file"
+  label_provenance: "unresolved"
+  related: "shares db/SCUT.py template with the esaa importer (32-trial protocol)"
