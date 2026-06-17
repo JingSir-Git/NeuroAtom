@@ -1,0 +1,46 @@
+# Task Configuration: Tsinghua Benchmark SSVEP dataset (Wang et al., 2017)
+# 35 subjects, 40-target SSVEP speller (8-15.8 Hz, 0.2 Hz steps), 6 blocks each.
+# Neuroscan Synamps2 @ 1000 Hz, downsampled to 250 Hz, 64-ch 10-20 EEG.
+#
+# Each S{n}.mat holds a 4-D `data` matrix [64, 1500, 40, 6] =
+# (electrode, time, target, block). Each data[:, :, t, b] is one 6 s stimulus
+# epoch (0.5 s pre-stimulus + 5.5 s post-onset) → one TRIAL atom labelled with
+# the target's stimulation frequency + phase (from Freq_Phase.mat).
+#
+# This is a dedicated importer for the dataset previously covered only by the
+# config-only `ssvep_benchmark` (MOABB) entry.
+
+dataset_id: "tsinghua_ssvep"
+dataset_name: "Tsinghua Benchmark SSVEP (Wang et al. 2017)"
+task_type: "ssvep"
+original_format: "mat"
+
+# Neuroscan export in µV.
+signal_unit: "uV"
+
+trial_definition:
+  mode: "trial"
+  # Pre-segmented 6 s epochs; stimulus flicker onset at 0.5 s.
+
+event_mapping: {}
+
+# M1/M2 are mastoids (typed REF by the importer); no channels excluded.
+channel_type_overrides: {}
+exclude_channels: []
+
+custom:
+  n_subjects: 35
+  n_targets: 40
+  n_blocks: 6
+  n_trials_per_subject: 240
+  sampling_rate: 250
+  original_sampling_rate: 1000
+  epoch_seconds: 6
+  prestimulus_seconds: 0.5
+  stimulation_seconds: 5
+  frequency_range_hz: [8.0, 15.8]
+  frequency_step_hz: 0.2
+  groups: ["experienced (S01-S08)", "naive (S09-S35)"]
+  electrode_layout: "64-channels.loc"
+  amplifier: "Neuroscan Synamps2"
+  citation: "Wang, Chen, Gao & Gao, IEEE TNSRE 2017"
