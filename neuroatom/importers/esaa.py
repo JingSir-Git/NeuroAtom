@@ -105,18 +105,39 @@ def _marker_position(mk: Any) -> Optional[int]:
     return int(arr[0]) if arr.size else None
 
 
-def _trial_onsets(markers: np.ndarray) -> List[int]:
-    """Start-marker sample positions per trial (markers[3k+2]), matching preprocess.py."""
-    n_trials = len(markers) // 3
-    onsets: List[int] = []
-    for k in range(n_trials):
-        idx = 3 * k + 2
-        if idx >= len(markers):
-            break
-        pos = _marker_position(markers.flat[idx])
+def _trial_segments(markers: np.ndarray) -> List[Tuple[int, int]]:
+    """Return [(global_trial_num, onset_sample), ...] from ``trail{N}S`` markers.
+
+    Marker descriptions carry the GLOBAL trial number (e.g. ``trail22S``), so this
+    works whether a subject is one file or split across files — S4_1 holds
+    trail1-21 and S4_2 holds trail22-32, each tagged with its true trial number.
+    The ``S`` (start) marker is the trial onset (matching preprocess.py's 3k+2).
+    """
+    out: List[Tuple[int, int]] = []
+    for mk in np.atleast_1d(markers):
+        desc = str(getattr(mk, "Description", ""))
+        m = re.match(r"trail(\d+)S$", desc, re.IGNORECASE)
+        if not m:
+            continue
+        pos = _marker_position(mk)
         if pos is not None:
-            onsets.append(pos)
-    return onsets
+            out.append((int(m.group(1)), pos))
+    return out
+
+
+def _find_subject_mats(subject_dir: Path) -> List[Path]:
+    """All data .mat files for a subject, across ESAA's layout variants.
+
+    Handles ``Sx/Sx/Sx.mat`` (single), ``Sx/Sx/Sx_1.mat`` + ``Sx_2.mat`` (split
+    recordings, e.g. S4/S9/S12/S13/S14/S17), and ``Sx/Sx.mat`` (S8). Excludes
+    ``__MACOSX`` resource-fork junk (``._*`` files).
+    """
+    found = list(subject_dir.glob("*.mat")) + list(subject_dir.glob("*/*.mat"))
+    mats = [
+        p for p in found
+        if "__MACOSX" not in p.parts and not p.name.startswith("._")
+    ]
+    return sorted(set(mats), key=lambda p: p.name)
 
 
 class ESAAImporter(BaseImporter):
@@ -126,12 +147,16 @@ class ESAAImporter(BaseImporter):
     def detect(path: Path) -> bool:
         path = Path(path)
         if path.is_file():
-            return bool(re.fullmatch(r"S\d+\.mat", path.name)) and path.parent.name == path.stem
+            return (
+                path.suffix.lower() == ".mat"
+                and not path.name.startswith("._")
+                and "__MACOSX" not in path.parts
+                and bool(re.match(r"S\d+", path.stem))
+            )
         if path.is_dir():
-            # ESAA root nests as S{n}/S{n}/S{n}.mat
             return any(
-                p.parent.name == p.stem
-                for p in path.glob("S*/S*/S*.mat")
+                sub.is_dir() and _SUBJECT_RE.match(sub.name) and _find_subject_mats(sub)
+                for sub in path.glob("S*")
             )
         return False
 
@@ -181,8 +206,8 @@ class ESAAImporter(BaseImporter):
         mat_path = Path(mat_path)
         require_mat_v5(mat_path, "ESAAImporter")
         if subject_id is None:
-            m = _SUBJECT_RE.match(mat_path.stem)
-            subject_id = mat_path.stem
+            mm = re.match(r"(S\d+)", mat_path.stem)
+            subject_id = mm.group(1) if mm else mat_path.stem
         sub_num = int(re.sub(r"\D", "", subject_id) or 0)
 
         ch_order = [c for c in (_CH_NAMES + ["ECG"])]
@@ -195,13 +220,13 @@ class ESAAImporter(BaseImporter):
         # Keep only channels actually present in the file.
         ch_order = [c for c in ch_order if c in m and m[c] is not None]
         markers = np.atleast_1d(m["Markers"])
-        onsets = _trial_onsets(markers)
+        segments = _trial_segments(markers)
         labels = _scut_labels(sub_num)
         win = int(_TRIAL_SECONDS * sfreq)
         n_total = int(np.ravel(m[ch_order[0]]).shape[0])
 
         if max_trials is not None:
-            onsets = onsets[:max_trials]
+            segments = segments[:max_trials]
 
         channel_infos = self._build_channel_infos(ch_order, sfreq)
         keep_names = [ci.name for ci in channel_infos]
@@ -219,7 +244,7 @@ class ESAAImporter(BaseImporter):
         stored_atoms: List[Atom] = []
         all_warnings: List[str] = []
 
-        for k, onset in enumerate(onsets):
+        for trial_num, onset in segments:
             end = min(onset + win, n_total)
             if end <= onset:
                 continue
@@ -231,11 +256,11 @@ class ESAAImporter(BaseImporter):
                 seg, source_unit="uV", pool_config=self.pool.config,
             )
 
-            trial_num = k + 1
             run_id = f"trial_{trial_num:02d}"
             self.pool.ensure_run(dataset_id, subject_id, session_id, run_id)
 
-            direction, speaker = (labels[k] if k < len(labels) else ("unknown", "unknown"))
+            idx = trial_num - 1
+            direction, speaker = (labels[idx] if 0 <= idx < len(labels) else ("unknown", "unknown"))
             annotations: List[Any] = [
                 CategoricalAnnotation(
                     annotation_id=f"ann_dir_{run_id}",
@@ -335,32 +360,55 @@ class ESAAImporter(BaseImporter):
         root = Path(root)
         dataset_id = self.task_config.dataset_id
 
-        mat_files = sorted(
-            (p for p in root.glob("S*/S*/S*.mat") if p.parent.name == p.stem),
-            key=lambda p: int(re.sub(r"\D", "", p.stem) or 0),
+        # One entry per subject dir, paired with all its .mat files
+        # (single Sx/Sx/Sx.mat, split Sx_1+Sx_2, or S8/S8.mat).
+        subject_dirs = sorted(
+            (d for d in root.glob("S*") if d.is_dir() and _SUBJECT_RE.match(d.name)),
+            key=lambda d: int(re.sub(r"\D", "", d.name) or 0),
         )
         if subjects:
-            mat_files = [f for f in mat_files if f.stem in set(subjects)]
+            subject_dirs = [d for d in subject_dirs if d.name in set(subjects)]
         if max_subjects:
-            mat_files = mat_files[:max_subjects]
+            subject_dirs = subject_dirs[:max_subjects]
+
+        subject_files = [(d.name, _find_subject_mats(d)) for d in subject_dirs]
+        subject_files = [(s, fs) for s, fs in subject_files if fs]
 
         self.pool.register_dataset(DatasetMeta(
             dataset_id=dataset_id, name=self.task_config.dataset_name,
             task_types=[self.task_config.task_type],
-            n_subjects=len(mat_files), original_format="mat",
+            n_subjects=len(subject_files), original_format="mat",
         ))
 
         results: List[ImportResult] = []
-        for mat_file in mat_files:
+        for sub_id, files in subject_files:
             self.pool.register_subject(SubjectMeta(
-                subject_id=mat_file.stem, dataset_id=dataset_id,
+                subject_id=sub_id, dataset_id=dataset_id,
             ))
-            try:
-                results.append(self.import_subject(
-                    mat_file, subject_id=mat_file.stem, max_trials=max_trials,
+            # Merge a subject's (possibly split) recordings into one result.
+            atoms: List[Atom] = []
+            warnings_acc: List[str] = []
+            chans: List[ChannelInfo] = []
+            for mat_file in files:
+                try:
+                    r = self.import_subject(
+                        mat_file, subject_id=sub_id, max_trials=max_trials,
+                    )
+                    atoms.extend(r.atoms)
+                    warnings_acc.extend(r.warnings)
+                    chans = r.channel_infos or chans
+                except Exception as e:
+                    logger.error("Failed to import %s: %s", mat_file.name, e)
+            if atoms:
+                results.append(ImportResult(
+                    atoms=atoms,
+                    run_meta=RunMeta(
+                        run_id=atoms[0].run_id, session_id="ses-01",
+                        subject_id=sub_id, dataset_id=dataset_id,
+                        task_type=self.task_config.task_type, n_trials=len(atoms),
+                    ),
+                    channel_infos=chans, warnings=warnings_acc,
                 ))
-            except Exception as e:
-                logger.error("Failed to import %s: %s", mat_file.name, e)
 
         try:
             self.pool.assess_quality(dataset_id)

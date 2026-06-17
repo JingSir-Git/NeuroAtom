@@ -35,7 +35,7 @@ channel_type_overrides: {}
 exclude_channels: []
 
 custom:
-  n_subjects: 20
+  n_subjects: 17
   n_trials_per_subject: 32
   trial_duration_seconds: 55
   sampling_rate: 1000

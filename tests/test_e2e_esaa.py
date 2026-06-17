@@ -46,17 +46,36 @@ class TestESAALabels:
 
 
 class TestESAAMarkers:
-    def test_trial_onsets(self):
+    def test_trial_segments_single_file(self):
         import numpy as np
         import scipy.io as sio
-        from neuroatom.importers.esaa import _trial_onsets
+        from neuroatom.importers.esaa import _trial_segments
         m = sio.loadmat(str(S1_MAT), squeeze_me=True, struct_as_record=False,
                         variable_names=["Markers"])
-        onsets = _trial_onsets(np.atleast_1d(m["Markers"]))
-        assert len(onsets) == 32
-        assert onsets[0] == 2541          # trail1S position
-        assert onsets[1] == 135521        # trail2S position
-        assert onsets == sorted(onsets)
+        segs = _trial_segments(np.atleast_1d(m["Markers"]))
+        assert len(segs) == 32
+        assert segs[0] == (1, 2541)        # trail1S → global trial 1
+        assert segs[1] == (2, 135521)      # trail2S → global trial 2
+        assert [n for n, _ in segs] == list(range(1, 33))
+
+    def test_find_subject_mats_layouts(self):
+        from neuroatom.importers.esaa import _find_subject_mats
+        assert len(_find_subject_mats(DATA_ROOT / "S1")) == 1   # single file
+        assert len(_find_subject_mats(DATA_ROOT / "S4")) == 2   # split S4_1 + S4_2
+        assert len(_find_subject_mats(DATA_ROOT / "S8")) == 1   # S8/S8.mat (one level up)
+        assert all("__MACOSX" not in p.parts for p in _find_subject_mats(DATA_ROOT / "S1"))
+
+    def test_split_file_global_numbering(self):
+        """S4_2 trials must keep their GLOBAL numbers 22..32, not restart at 1."""
+        import numpy as np
+        import scipy.io as sio
+        from neuroatom.importers.esaa import _trial_segments, _find_subject_mats
+        files = _find_subject_mats(DATA_ROOT / "S4")
+        m2 = sio.loadmat(str(files[1]), squeeze_me=True, struct_as_record=False,
+                         variable_names=["Markers"])
+        nums = [n for n, _ in _trial_segments(np.atleast_1d(m2["Markers"]))]
+        assert nums[0] == 22
+        assert max(nums) == 32
 
 
 class TestESAAImporter:
@@ -122,3 +141,26 @@ class TestESAAImporter:
         with h5py.File(str(shard_path), "r") as f:
             sig = f[f"/atoms/{atom.atom_id}/signal"][:]
             assert sig.shape == (65, 55000)
+
+    def test_split_subject_imported(self, pool, task_config):
+        """S4 is split across S4_1/S4_2; both files import with global trial numbers."""
+        from neuroatom.importers.esaa import ESAAImporter, _scut_labels
+
+        imp = ESAAImporter(pool=pool, task_config=task_config)
+        # max_trials applies per file → trials 1,2 (S4_1) + 22,23 (S4_2)
+        results = imp.import_dataset(DATA_ROOT, subjects=["S4"], max_trials=2)
+        assert len(results) == 1
+        trial_nums = sorted(a.trial_index for a in results[0].atoms)
+        assert 22 in trial_nums  # a trial from the SECOND file, globally numbered
+        atom22 = next(a for a in results[0].atoms if a.trial_index == 22)
+        dir22 = next(x.value for x in atom22.annotations if x.name == "attended_direction")
+        assert dir22 == str(_scut_labels(4)[21][0])  # scut_order(S4)[trial 22 - 1]
+
+    def test_s8_alt_nesting_imported(self, pool, task_config):
+        """S8 is stored as S8/S8.mat (one level up) and must still import."""
+        from neuroatom.importers.esaa import ESAAImporter
+        imp = ESAAImporter(pool=pool, task_config=task_config)
+        results = imp.import_dataset(DATA_ROOT, subjects=["S8"], max_trials=1)
+        assert len(results) == 1
+        assert len(results[0].atoms) == 1
+        assert results[0].atoms[0].subject_id == "S8"
